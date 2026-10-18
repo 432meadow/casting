@@ -27,6 +27,10 @@ jobs:
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
+          if [ -z "$SPARKLE_PRIVATE_KEY" ]; then
+            echo "::error::The SPARKLE_PRIVATE_KEY repository secret is not set (see README, Releases and updates)."
+            exit 1
+          fi
           version="${GITHUB_REF_NAME#v}"
           build="$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' build/casting.app/Contents/Info.plist)"
           zip="casting-$version.zip"
