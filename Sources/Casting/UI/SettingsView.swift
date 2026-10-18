@@ -17,6 +17,8 @@ struct SettingsView: View {
 
 private struct LibrarySettings: View {
     @Environment(AppModel.self) private var model
+    @Environment(Updater.self) private var updater
+    @State private var checksForUpdates = false
     @State private var selectedFolder: String?
     @State private var isConfirmingTagWriting = false
 
@@ -59,6 +61,21 @@ private struct LibrarySettings: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 TagWriteStatus(queue: model.tagWriter)
+            }
+            if updater.isAvailable {
+                Section("Updates") {
+                    Toggle("Check for updates automatically", isOn: $checksForUpdates)
+                        .onAppear { checksForUpdates = updater.checksAutomatically }
+                        .onChange(of: checksForUpdates) { _, on in updater.checksAutomatically = on }
+                    HStack {
+                        Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?")")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Check Now") { updater.checkForUpdates() }
+                            .disabled(!updater.canCheckForUpdates)
+                    }
+                }
             }
         }
         .formStyle(.grouped)

@@ -27,6 +27,30 @@ engine at zero volume. The tag-writing tests write only to generated files in a 
 To try a build without touching your real library, set `CASTING_SUPPORT_DIR` to a scratch folder
 (it stands in for `~/Library/Application Support`).
 
+## Releases and updates
+
+Installed copies update themselves with [Sparkle](https://sparkle-project.org): they read
+`appcast.xml` from the latest GitHub release (daily, or **casting ▸ Check for Updates…**) and only
+install a zip whose EdDSA signature matches the public key in `scripts/bundle.sh`.
+
+To release, tag and push; [`.github/workflows/release.yml`](.github/workflows/release.yml) builds,
+signs and publishes the release:
+
+```bash
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+The version shown in the app is the tag; the build number is the commit count.
+
+The private signing key lives in the login Keychain (Sparkle's `generate_keys --account casting`)
+and, for the workflow, in the `SPARKLE_PRIVATE_KEY` repository secret. Builds are ad-hoc signed,
+not notarized, so the first copy downloaded by hand needs its quarantine flag cleared before it
+opens (updates installed by Sparkle don't):
+
+```bash
+xattr -dr com.apple.quarantine /Applications/casting.app
+```
+
 ## Features
 
 **Library**
@@ -239,6 +263,7 @@ The music lives on an SMB share that can be slow (measured 0.2–3 MB/s). So:
 | `Sources/Casting/Metadata/` | MusicBrainz / Wikipedia / ListenBrainz client for artist pages (rate limit, disk cache) |
 | `Sources/Casting/Soulseek/` | Soulseek client: wire codec, messages, client actor (server + peer connections), UI model |
 | `Sources/Casting/AppModel*.swift` | App state, selection, actions and undo, scanning, library housekeeping |
+| `Sources/Casting/Updater.swift` | Sparkle in-app updates (Check for Updates…, automatic checks) |
 | `Sources/Casting/UI/` | Track table (NSTableView), sidebar, albums, browser, Up Next, Get Info, smart editor, EQ, settings, menu bar |
 | `Sources/ObjCSupport/` | Catches NSExceptions (predicate evaluation, audio graph connections) |
 | `Tests/CastingTests/` | 122 tests: listening stats, the listen log (store, v2→v3 upgrade, player skip/pause/stop tracking), discography matching, artist index, smart playlist predicates, albums/artwork, library editing, history/removal/saved tag writes and the v1→v2 upgrade, search scopes, duplicates, missing-file checks, tag reading and writing (on generated files), BPM detection (generated drum patterns, WAV and FLAC excerpts), player, Soulseek codec + loopback client tests (search, wishlist, browse, download, resume, denial, blocking, serving searches + uploads, upload speed limit) against a mock server |

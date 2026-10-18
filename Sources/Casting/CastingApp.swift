@@ -5,6 +5,7 @@ import SwiftUI
 struct CastingApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var model = AppModel()
+    @State private var updater = Updater()
 
     var body: some Scene {
         WindowGroup("casting", id: "main") {
@@ -14,6 +15,12 @@ struct CastingApp: App {
                 .frame(minWidth: 900, minHeight: 500)
         }
         .commands {
+            CommandGroup(after: .appInfo) {
+                if updater.isAvailable {
+                    Button("Check for Updates…") { updater.checkForUpdates() }
+                        .disabled(!updater.canCheckForUpdates)
+                }
+            }
             CommandGroup(replacing: .newItem) {
                 Button("New Playlist") { model.createPlaylist() }
                     .keyboardShortcut("n", modifiers: .command)
@@ -49,6 +56,7 @@ struct CastingApp: App {
         Settings {
             SettingsView()
                 .environment(model)
+                .environment(updater)
                 .tint(Palette.warm)
         }
 

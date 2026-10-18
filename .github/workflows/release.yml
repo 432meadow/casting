@@ -1,0 +1,60 @@
+# Pushing a tag like v0.2.0 builds casting.app, signs the zip for Sparkle, and publishes a GitHub
+# release with the zip and appcast.xml. Installed copies find it through
+# https://github.com/432meadow/casting/releases/latest/download/appcast.xml.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # bundle.sh counts commits for the build number
+
+      - name: Build casting.app
+        run: |
+          swift --version
+          scripts/bundle.sh
+
+      - name: Zip and sign the update
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          build="$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' build/casting.app/Contents/Info.plist)"
+          zip="casting-$version.zip"
+          ditto -c -k --sequesterRsrc --keepParent build/casting.app "build/$zip"
+          signature="$(echo "$SPARKLE_PRIVATE_KEY" | .build/artifacts/sparkle/Sparkle/bin/sign_update --ed-key-file - -p "build/$zip")"
+          length="$(stat -f %z "build/$zip")"
+          url="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/$zip"
+          notes="https://github.com/$GITHUB_REPOSITORY/releases/tag/$GITHUB_REF_NAME"
+          cat > build/appcast.xml <<XML
+          <?xml version="1.0" encoding="utf-8"?>
+          <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+            <channel>
+              <title>casting</title>
+              <item>
+                <title>$version</title>
+                <pubDate>$(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S +0000')</pubDate>
+                <sparkle:version>$build</sparkle:version>
+                <sparkle:shortVersionString>$version</sparkle:shortVersionString>
+                <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+                <sparkle:fullReleaseNotesLink>$notes</sparkle:fullReleaseNotesLink>
+                <enclosure url="$url" length="$length" type="application/octet-stream" sparkle:edSignature="$signature"/>
+              </item>
+            </channel>
+          </rss>
+          XML
+          echo "ZIP=build/$zip" >> "$GITHUB_ENV"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" "$ZIP" build/appcast.xml --title "casting ${GITHUB_REF_NAME#v}" --generate-notes
