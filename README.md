@@ -2,6 +2,10 @@
 
 A native macOS music library and player (SwiftUI + AVAudioEngine).
 
+It plays music from anywhere the Mac can see it: the internal disk, an external drive, or a
+network share (SMB/NAS). Local files are played in place; for slow network shares there are a few
+extras, described under [Playback from a network share](#playback-from-a-network-share).
+
 ## Build, run, test
 
 Needs macOS 14+ and the Swift toolchain (Xcode Command Line Tools are enough).
@@ -74,7 +78,7 @@ xattr -dr com.apple.quarantine /Applications/casting.app
   artist to open their page, double-click anything to play it); listening by hour of day and
   average per weekday; a GitHub-style calendar of the last 12 months; and the most skipped
   tracks. Every listen is logged with the time actually spent playing (pauses and waiting for
-  the share left out) and how it ended: finished, **skipped** (moved on before the last 10 s, or
+  a network share left out) and how it ended: finished, **skipped** (moved on before the last 10 s, or
   last 10% of a short track) or stopped. Listens under a second aren't kept. Plays from before
   the log existed count their track's length, and the view says so. Skip counts are searchable
   (`skips:>2`) and there's an optional Skips column. Clear History also clears the log.
@@ -129,11 +133,12 @@ xattr -dr com.apple.quarantine /Applications/casting.app
   Lightweight on purpose (`Library/BPMDetector.swift`): it reads ~30 s from the middle of the
   file's audio — for MP3 and FLAC just that byte range (≈1.2 MB / ≈3 MB, cut at a frame
   boundary, past any embedded cover art), since AudioToolbox would otherwise read the whole file
-  over the share to seek — mixes it to mono at ~11 kHz, and takes the strongest periodicity of a
-  spectral-flux onset envelope (~10 ms of CPU per track; reads took ~1 s each from the share).
-  Tempos are folded into 70–140 BPM, the convention 99% of the library's existing tags follow. On
-  319 randomly picked tagged tracks it agreed with the tag (within 2%) on 80%, and on 84% if
-  half/double/3:2 time counts; 6% had no clear beat and are left empty.
+  to seek, which is slow over a network share — mixes it to mono at ~11 kHz, and takes the
+  strongest periodicity of a spectral-flux onset envelope (~10 ms of CPU per track; reads took
+  ~1 s each from a slow network share). Tempos are folded into 70–140 BPM, the convention nearly
+  all existing BPM tags in the test library followed. On 319 randomly picked tagged tracks it
+  agreed with the tag (within 2%) on 80%, and on 84% if half/double/3:2 time counts; 6% had no
+  clear beat and are left empty.
 
 **Playback**
 - Gapless playback; shuffle (⌥⌘S), repeat off/all/one (⌘R).
@@ -198,12 +203,12 @@ xattr -dr com.apple.quarantine /Applications/casting.app
 Off by default: **Settings ▸ Library ▸ Write tags to files** (asks for confirmation the first
 time). With it on, Get Info edits and ratings are queued and written into the files in the
 background, one file at a time, with progress in Settings and the window subtitle. Play counts
-stay in casting's database (rewriting a file on the share after every play isn't worth it).
+stay in casting's database (rewriting a file after every play isn't worth it).
 
 | Format | Tags | Rating |
 | --- | --- | --- |
 | MP3 | ID3v2.2 / v2.3 / v2.4 (keeps the file's version; untagged files get v2.3) | `POPM`, MusicBee values (½★ = 13 … 4½★ = 242, 5★ = 255); existing POPM frames keep their email and play counter |
-| FLAC | Vorbis comments | `RATING` 0–100 (20 per star), as already used in this library |
+| FLAC | Vorbis comments | `RATING` 0–100 (20 per star) |
 | M4A | iTunes `ilst` items | not written: no rating field that other players agree on |
 
 WAV/AIFF, unsynchronised or compressed ID3 tags, and fragmented MP4 are reported and skipped.
@@ -217,7 +222,7 @@ AVFoundation reads the same duration).
 When the new MP3/FLAC tags fit in the space the old tag takes up (its padding absorbs the
 change, which is the usual case), only the tag is read and only the bytes that changed are
 written back in place, then read back and compared (the old bytes are put back if they differ).
-The audio is never written to. Over a remote share (~1.3 MB/s) that took writes from about a
+The audio is never written to. Over a slow network share (~1.3 MB/s) that took writes from about a
 minute per file to a few seconds. If the original's size or modification date changed
 meanwhile it's skipped. Otherwise permissions, creation date and extended attributes (Finder
 tags) are copied over and the copy is renamed over the original (atomic). The track that's
@@ -237,9 +242,11 @@ owns and copies everything else verbatim, which is also what makes the byte-for-
 above possible. So: small writers in `Sources/Casting/Library/TagWriting/` (`ID3Tag`, `FLACTag`,
 `MP4Tag`), no dependencies.
 
-## Playback from the network share
+## Playback from a network share
 
-The music lives on an SMB share that can be slow (measured 0.2–3 MB/s). So:
+Files on the Mac's own disks and external drives are played in place. Files on a network
+volume (SMB, AFP, NFS) can arrive slowly (the share casting was developed against measured
+0.2–3 MB/s), so for those:
 - A track you start plays **straight from the share** if it's MP3/AAC/WAV/AIFF (needs ~40 KB/s),
   so it starts as soon as the share responds. If it takes over 8 s the bar says
   "Waiting for the network share…".
