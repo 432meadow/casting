@@ -59,6 +59,7 @@ final class AppModel {
     var sortOrder: [KeyPathComparator<Track>] = AppModel.defaultSort { didSet { refreshVisible() } }
 
     let player = Player()
+    let mixer = Mixer()
     let soulseek = SoulseekModel()
 
     /// The window's undo manager (set by the main view), for undoing edits and playlist changes.
@@ -196,6 +197,10 @@ final class AppModel {
     var smartPlaylistDraft: SmartPlaylistDraft?
     /// Whether the Up Next panel is open.
     var isShowingUpNext = false
+    /// Whether the two-deck mixer sits above the now-playing bar.
+    var isShowingMixer = UserDefaults.standard.bool(forKey: "mixer.isShowing") {
+        didSet { UserDefaults.standard.set(isShowingMixer, forKey: "mixer.isShowing") }
+    }
 
     func showInfo(for tracks: [Track]) {
         guard !tracks.isEmpty else { return }
@@ -234,6 +239,7 @@ final class AppModel {
         player.locate = makeLocator()
         player.onTrackPlayed = { [weak self] track in self?.recordPlay(track) }
         player.onListenEnded = { [weak self] track, listen in self?.recordListen(listen, of: track) }
+        connectMixer()
         soulseek.importFolders = { [weak self] folders in
             guard let self, !self.isScanning, self.store != nil else { return false }
             self.addToLibrary(folders)
@@ -255,7 +261,10 @@ final class AppModel {
             return known
         }
         // Don't swap a file out from under the player.
-        tagWriter.isInUse = { [weak self] path in self?.player.currentTrack?.path == path }
+        tagWriter.isInUse = { [weak self] path in
+            guard let self else { return false }
+            return self.player.currentTrack?.path == path || self.mixer.decks.contains { $0.track?.path == path }
+        }
         tagWriter.didWrite = { [weak self] path, size in self?.noteFileRewritten(path: path, size: size) }
         tagWriter.persist = { [weak self] path, values in try? self?.store?.savePendingTagWrite(values, forPath: path) }
         restorePendingTagWrites()

@@ -46,6 +46,9 @@ struct ContentView: View {
             }
             .searchable(text: $model.searchText, placement: .toolbar, prompt: "Search  (artist:, bpm:120-128, rating:>=4…)")
 
+            if model.isShowingMixer {
+                MixerView()
+            }
             NowPlayingBar()
         }
         .sheet(item: Binding(

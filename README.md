@@ -145,6 +145,12 @@ xattr -dr com.apple.quarantine /Applications/casting.app
 - **Up Next** panel (⌥⌘U): Play Next (⌥↩), Add to Queue (⌥⇧↩), reorder, remove, jump.
 - Play counts and last-played are recorded after half a track (or 4 minutes).
 - 10-band **equalizer** with presets (⌥⌘E).
+- Two-deck **mixer** (⇧⌘M) for blending tracks by hand: load a deck from the track menu (⌥⌘1 / ⌥⌘2)
+  or by dragging a track onto it. Equal-power crossfader, auto crossfade over 4–32 s (⇧⌘X),
+  3-band EQ with kills, channel faders, tempo ±8% with hold-to-nudge and BPM match, cue point,
+  and a loudness overview to click-seek in. **Continue in Mixer** moves the playing track onto a
+  deck at the same spot. The mixer and the queue player take turns: starting one pauses the other.
+  There's one output, so no headphone pre-listen.
 - Output device picker and AirPlay button in the now-playing bar.
 - Media keys, Control Center / Now Playing widget, headphone buttons.
 - Menu bar mini-player; the app keeps running when the window is closed.

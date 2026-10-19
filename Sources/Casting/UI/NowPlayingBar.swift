@@ -60,6 +60,7 @@ struct NowPlayingBar: View {
                         Button("Go to Artist") { model.showArtist(track.displayArtist) }
                     }
                     Button("Get Info") { model.showInfo(for: [track]) }
+                    Button("Continue in Mixer") { model.continueInMixer() }
                     Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: track.path)]) }
                 }
             }
@@ -103,6 +104,11 @@ struct NowPlayingBar: View {
                         .foregroundStyle(player.equalizer.isEnabled ? Palette.warm : .secondary)
                 }
                 .help("Equalizer")
+                Button { model.isShowingMixer.toggle() } label: {
+                    Image(systemName: "dial.medium")
+                        .foregroundStyle(model.isShowingMixer ? Palette.warm : .secondary)
+                }
+                .help("Mixer (⇧⌘M)")
                 OutputMenu()
                 AirPlayButton()
                     .frame(width: 22, height: 22)

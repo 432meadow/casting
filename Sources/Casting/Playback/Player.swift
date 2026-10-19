@@ -84,6 +84,10 @@ final class Player {
     /// Called when playback moves on from a queue entry that played for at least a second, with
     /// how long it actually played and how it ended.
     @ObservationIgnored var onListenEnded: ((Track, ListenRecord) -> Void)?
+    /// Called whenever playback starts or resumes, so the mixer's decks can pause.
+    @ObservationIgnored var onStartedPlaying: (() -> Void)?
+    /// Called when the user picks another output device (nil: the system output).
+    @ObservationIgnored var onOutputDeviceChanged: ((String?) -> Void)?
 
     private enum Keys {
         static let volume = "player.volume"
@@ -202,11 +206,16 @@ final class Player {
                 pausedTime = nil
                 node.play()
                 isPlaying = true
+                onStartedPlaying?()
             } catch {
                 errorMessage = "Audio output failed: \(error.localizedDescription)"
             }
         }
         nowPlaying?.update()
+    }
+
+    func pause() {
+        if isPlaying { togglePlayPause() }
     }
 
     func next() {
@@ -387,6 +396,7 @@ final class Player {
     func setOutputDevice(_ uid: String?) {
         outputDeviceUID = uid
         UserDefaults.standard.set(uid, forKey: Keys.outputDevice)
+        onOutputDeviceChanged?(uid)
         let device = uid.flatMap(OutputDevices.deviceID(forUID:)) ?? OutputDevices.defaultOutputDeviceID()
         guard let device else { return }
         let position = currentTime
@@ -579,6 +589,7 @@ final class Player {
             } else {
                 node.play()
                 isPlaying = true
+                onStartedPlaying?()
             }
         } catch {
             errorMessage = "Audio output failed: \(error.localizedDescription)"

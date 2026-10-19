@@ -14,6 +14,10 @@ enum TrackMenu {
         menu.addItem(ClosureMenuItem("Add to Queue") { model.addToQueue(tracks) })
         menu.addItem(.separator())
 
+        menu.addItem(ClosureMenuItem("Load on Deck A") { model.load(tracks[0], on: .a) })
+        menu.addItem(ClosureMenuItem("Load on Deck B") { model.load(tracks[0], on: .b) })
+        menu.addItem(.separator())
+
         menu.addItem(addToPlaylistItem(tracks, model: model))
         if model.editablePlaylistID != nil {
             menu.addItem(ClosureMenuItem("Remove from Playlist") { model.removeFromCurrentPlaylist(tracks) })

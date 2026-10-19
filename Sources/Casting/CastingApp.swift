@@ -99,6 +99,12 @@ private struct TrackCommands: Commands {
             Button("Add to Queue") { model.addToQueue(selected) }
                 .keyboardShortcut(.return, modifiers: [.option, .shift])
                 .disabled(selected.isEmpty)
+            Button("Load on Deck A") { if let track = selected.first { model.load(track, on: .a) } }
+                .keyboardShortcut("1", modifiers: [.command, .option])
+                .disabled(selected.isEmpty)
+            Button("Load on Deck B") { if let track = selected.first { model.load(track, on: .b) } }
+                .keyboardShortcut("2", modifiers: [.command, .option])
+                .disabled(selected.isEmpty)
             Divider()
             Button("Remove from Playlist") { model.removeFromCurrentPlaylist(selected) }
                 .keyboardShortcut(.delete, modifiers: .command)
@@ -155,6 +161,16 @@ private struct ControlsCommands: Commands {
                 .keyboardShortcut("u", modifiers: [.command, .option])
             Button("Equalizer") { openWindow(id: "equalizer") }
                 .keyboardShortcut("e", modifiers: [.command, .option])
+            Divider()
+            Button(model.isShowingMixer ? "Hide Mixer" : "Show Mixer") { model.isShowingMixer.toggle() }
+                .keyboardShortcut("m", modifiers: [.command, .shift])
+            Button("Continue in Mixer") { model.continueInMixer() }
+                .disabled(player.currentTrack == nil)
+            Button(model.mixer.isAutoFading ? "Stop Crossfade" : "Crossfade") {
+                model.mixer.isAutoFading ? model.mixer.cancelAutoFade() : model.mixer.autoFade()
+            }
+            .keyboardShortcut("x", modifiers: [.command, .shift])
+            .disabled(!model.isShowingMixer)
         }
     }
 }
