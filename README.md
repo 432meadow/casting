@@ -6,18 +6,6 @@ It plays music from anywhere the Mac can see it: the internal disk, an external 
 network share (SMB/NAS). Local files are played in place; for slow network shares there are a few
 extras, described under [Playback from a network share](#playback-from-a-network-share).
 
-## Formerly casting
-
-susurrus used to be called casting. The new name came with a new bundle ID
-(`io.github.432meadow.susurrus`), and Sparkle can't install an app with a new name *and* a new
-bundle ID over the old one, so a copy of casting doesn't update itself to susurrus: it says a new
-version is out and links to the release, to download susurrus once by hand (and clear its
-quarantine flag, below). The first time susurrus starts it takes over casting's
-`~/Library/Application Support/casting` (library, covers, Soulseek conversations, beat grids),
-`~/Library/Caches/casting` and `~/Library/Logs/casting` (moved, not copied), its settings and its
-Soulseek password (macOS may ask once whether susurrus may read it), so nothing is lost. After
-that, casting.app can be deleted (`Sources/Susurrus/LegacyMigration.swift`).
-
 ## Build, run, test
 
 Needs macOS 14+ and the Swift toolchain (Xcode Command Line Tools are enough).
