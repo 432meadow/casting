@@ -1,10 +1,22 @@
-# casting
+# susurrus
 
 A native macOS music library and player (SwiftUI + AVAudioEngine).
 
 It plays music from anywhere the Mac can see it: the internal disk, an external drive, or a
 network share (SMB/NAS). Local files are played in place; for slow network shares there are a few
 extras, described under [Playback from a network share](#playback-from-a-network-share).
+
+## Formerly casting
+
+susurrus used to be called casting. The new name came with a new bundle ID
+(`io.github.432meadow.susurrus`), and Sparkle can't install an app with a new name *and* a new
+bundle ID over the old one, so a copy of casting doesn't update itself to susurrus: it says a new
+version is out and links to the release, to download susurrus once by hand (and clear its
+quarantine flag, below). The first time susurrus starts it takes over casting's
+`~/Library/Application Support/casting` (library, covers, Soulseek conversations, beat grids),
+`~/Library/Caches/casting` and `~/Library/Logs/casting` (moved, not copied), its settings and its
+Soulseek password (macOS may ask once whether susurrus may read it), so nothing is lost. After
+that, casting.app can be deleted (`Sources/Susurrus/LegacyMigration.swift`).
 
 ## Build, run, test
 
@@ -15,7 +27,7 @@ scripts/bundle.sh
 ```
 
 ```bash
-open "build/casting.app"
+open "build/susurrus.app"
 ```
 
 ```bash
@@ -28,13 +40,13 @@ with a tiny runner (`scripts/testrunner/main.swift`). Pass swift-testing flags t
 `scripts/test.sh --filter Player`. The player tests play generated tones through the real audio
 engine at zero volume. The tag-writing tests write only to generated files in a temp folder.
 
-To try a build without touching your real library, set `CASTING_SUPPORT_DIR` to a scratch folder
+To try a build without touching your real library, set `SUSURRUS_SUPPORT_DIR` to a scratch folder
 (it stands in for `~/Library/Application Support`).
 
 ## Releases and updates
 
 Installed copies update themselves with [Sparkle](https://sparkle-project.org): they read
-`appcast.xml` from the latest GitHub release (daily, or **casting ▸ Check for Updates…**) and only
+`appcast.xml` from the latest GitHub release (daily, or **susurrus ▸ Check for Updates…**) and only
 install a zip whose EdDSA signature matches the public key in `scripts/bundle.sh`.
 
 To release, tag and push; [`.github/workflows/release.yml`](.github/workflows/release.yml) builds,
@@ -46,13 +58,13 @@ git tag v0.2.0 && git push origin v0.2.0
 
 The version shown in the app is the tag; the build number is the commit count.
 
-The private signing key lives in the login Keychain (Sparkle's `generate_keys --account casting`)
+The private signing key lives in the login Keychain (Sparkle's `generate_keys --account susurrus`)
 and, for the workflow, in the `SPARKLE_PRIVATE_KEY` repository secret. Builds are ad-hoc signed,
 not notarized, so the first copy downloaded by hand needs its quarantine flag cleared before it
 opens (updates installed by Sparkle don't):
 
 ```bash
-xattr -dr com.apple.quarantine /Applications/casting.app
+xattr -dr com.apple.quarantine /Applications/susurrus.app
 ```
 
 ## Features
@@ -98,7 +110,7 @@ xattr -dr com.apple.quarantine /Applications/casting.app
   - **ListenBrainz**: similar artists; the ones in your library are highlighted and open their
     page, the others offer a Soulseek search or wishlist entry.
 
-  Responses are cached for two weeks in `~/Library/Caches/casting/ArtistInfo` (a stale copy is
+  Responses are cached for two weeks in `~/Library/Caches/susurrus/ArtistInfo` (a stale copy is
   used when offline), and MusicBrainz requests are spaced a second apart as it asks
   (`Metadata/ArtistInfoService.swift`).
 - **Go to Current Track** (⌘L, or click the title in the now-playing bar) selects and centers the
@@ -113,9 +125,9 @@ xattr -dr com.apple.quarantine /Applications/casting.app
   path fixed silently. **Locate File…** (Track menu or right-click) relinks a missing track and
   also finds its missing neighbours in the chosen file's folder.
 - **Remove from Library…** (⌥⌘⌫, right-click, or File ▸ Remove Missing Tracks from Library…)
-  deletes tracks from casting's database after a confirmation. The files are never touched.
+  deletes tracks from susurrus's database after a confirmation. The files are never touched.
 
-**Editing** (saved to the casting database; optionally also written into the files, see below)
+**Editing** (saved to the susurrus database; optionally also written into the files, see below)
 - **Get Info** (⌘I) for one or many tracks; mixed values stay untouched unless changed.
 - Ratings: click stars in the table, Track ▸ Rating, or ⌘0–⌘5.
 - Playlists: new (⌘N), from selection (⇧⌘N), folders, rename, delete, drag tracks onto a
@@ -159,11 +171,11 @@ xattr -dr com.apple.quarantine /Applications/casting.app
   release marks the tracks as a compilation (`Library/ReleaseMatcher.swift`).
 - **Covers** come from the [Cover Art Archive](https://coverartarchive.org) (at most 1200 px;
   bigger ones are scaled down). A fetched cover shows at once (it's kept in
-  `~/Library/Application Support/casting/Covers` and outranks embedded art), and with "Write
+  `~/Library/Application Support/susurrus/Covers` and outranks embedded art), and with "Write
   tags to files" on it's embedded in the files too (see below). **Find Missing Covers** (Track
   menu or right-click, or File ▸ Find Missing Covers for All Albums) looks for each album with
   no cover (embedded, fetched, or a cover.jpg/folder.jpg/front.jpg next to the files, which
-  casting now also shows) and takes the cover of the MusicBrainz release group with exactly
+  susurrus now also shows) and takes the cover of the MusicBrainz release group with exactly
   that title by that artist, in the background with progress in the subtitle.
 
 **Import and export** (File menu; nothing here reads audio, it all comes from the database)
@@ -180,12 +192,12 @@ xattr -dr com.apple.quarantine /Applications/casting.app
   Export Library…, a `Library.xml`; dropping one on the window works too). Tracks are matched by
   path, and a preview shows what would change before anything does, with the option to add the
   files that are on disk but not in the library. It only fills gaps or brings values forward:
-  ratings only where casting has none (ratings inherited from the album are ignored), the
+  ratings only where susurrus has none (ratings inherited from the album are ignored), the
   higher play count (adding them would count plays from before the switch twice), the later
   last played and the earlier date added. Playlists and folders are recreated inside a new
   **Apple Music** folder; the whole-library and media-kind lists (Library, Music, Downloaded,
-  Podcasts…) are skipped. Skip counts stay casting's own (they come from its listen log).
-  Everything goes into casting's database only, never into the files, and one **Undo** puts it
+  Podcasts…) are skipped. Skip counts stay susurrus's own (they come from its listen log).
+  Everything goes into susurrus's database only, never into the files, and one **Undo** puts it
   all back (tracks it added stay in the library, as with Add to Library).
 - **Export Rekordbox XML…** (or right-click a playlist ▸ Export for Rekordbox…) writes the
   whole library or the chosen playlists and their tracks in Rekordbox's `DJ_PLAYLISTS` format:
@@ -228,8 +240,8 @@ xattr -dr com.apple.quarantine /Applications/casting.app
   and, if you want, diagnostics: versions, Mac model, library size and formats, whether the music
   is on a local disk or a share, a few settings, the last 40 errors, and the latest crash
   report's summary. Paths and the Mac's user and computer names are taken out, the diagnostics
-  can be edited before sending, and casting itself sends nothing. The errors come from a small
-  log in `~/Library/Logs/casting/events.log` that survives a crash.
+  can be edited before sending, and susurrus itself sends nothing. The errors come from a small
+  log in `~/Library/Logs/susurrus/events.log` that survives a crash.
 - Queue and position are restored (paused) on the next launch.
 
 **Soulseek** (phases 1–4: search + downloads + sharing + messages)
@@ -249,11 +261,11 @@ xattr -dr com.apple.quarantine /Applications/casting.app
 - The protocol (message layouts, zlib-wrapped search results, the direct + server-relayed peer
   connection dance, and the QueueUpload → TransferRequest → raw-byte `F` connection transfer
   flow) follows Nicotine+ 3.3.10's `doc/SLSKPROTOCOL.md`, implemented from scratch in
-  `Sources/Casting/Soulseek/` on Network.framework + BSD sockets — no dependencies. The peer
+  `Sources/Susurrus/Soulseek/` on Network.framework + BSD sockets — no dependencies. The peer
   listener uses BSD sockets because `NWListener` fails (EINVAL) on Macs with certain network
   filters; without a reachable port everything still works through server-relayed connections.
 - **Sharing**: pick a shared folder in Settings ▸ Soulseek. It's scanned off the main thread
-  (library tracks contribute bitrate/duration/bit-depth attributes), casting joins the
+  (library tracks contribute bitrate/duration/bit-depth attributes), susurrus joins the
   distributed network as a leaf (adopts a parent, takes no children), answers matching searches
   directly to the searcher, serves browse requests, and uploads queued files over `F`
   connections — two slots, a queue with position replies, resume offsets honored. Search
@@ -282,19 +294,19 @@ xattr -dr com.apple.quarantine /Applications/casting.app
   offline users; every message received is acknowledged (`MessageAcked`, code 23) so it isn't
   sent again, and ones that waited for you arrive at login marked as sent while you were
   offline. Blocked users' messages are dropped. History is kept in
-  `~/Library/Application Support/casting/Soulseek/Messages.json`.
+  `~/Library/Application Support/susurrus/Soulseek/Messages.json`.
 - **User info** (right-click ▸ Show Info, or Info in a conversation): a sheet with the user's
   status, the server's stats (`GetUserStats`, code 36: average speed, uploads, files and
   folders), and what the user reports about themselves (peer `UserInfoRequest` → `UserInfoResponse`,
   codes 15 → 16: description, picture, upload slots, queue, free slot), with Browse Files,
-  Message and Block. casting answers the same request with the description from Settings ▸
+  Message and Block. susurrus answers the same request with the description from Settings ▸
   Soulseek, its two upload slots, its queue and whether a slot is free (blocked users get no
   answer).
 - **Tagging finished downloads** (Settings ▸ Soulseek, on by default): once a download folder
   has no transfers left, it's matched to a MusicBrainz release like Look Up Album ("CD1"/"Disc 2"
   subfolders count as one album). Only when every file pairs with a track and the lengths agree
   are the tags fixed and written into the downloaded files (even with "Write tags to files"
-  off; they're casting's own downloads), the cover embedded and saved as cover.jpg. Optionally
+  off; they're susurrus's own downloads), the cover embedded and saved as cover.jpg. Optionally
   the album is also **moved into "Artist/Album (Year)"** inside the download folder, files
   renamed "03 Title.ext" ("1-03 Title.ext" on multi-disc releases), along with the rest of the
   folder (cue sheets, logs, images). Anything less certain is left alone with a notification;
@@ -304,7 +316,7 @@ xattr -dr com.apple.quarantine /Applications/casting.app
   messages (one per sender, so a burst at login doesn't flood). They need the app bundle (not
   `swift run`).
 - **Upload speed limit** (Settings ▸ Soulseek): one cap for all uploads together, paced in small
-  chunks so the rate stays even. **Connect when casting starts** keeps the share and wishlist
+  chunks so the rate stays even. **Connect when susurrus starts** keeps the share and wishlist
   going without a search first.
 
 ## Writing tags to files
@@ -312,7 +324,7 @@ xattr -dr com.apple.quarantine /Applications/casting.app
 Off by default: **Settings ▸ Library ▸ Write tags to files** (asks for confirmation the first
 time). With it on, Get Info edits and ratings are queued and written into the files in the
 background, one file at a time, with progress in Settings and the window subtitle. Play counts
-stay in casting's database (rewriting a file after every play isn't worth it).
+stay in susurrus's database (rewriting a file after every play isn't worth it).
 
 | Format | Tags | Rating | Cover |
 | --- | --- | --- | --- |
@@ -346,15 +358,15 @@ Command Line Tools:
 - *AVFoundation*: reads tags but can only write them via passthrough export of MP4, which rebuilds
   the whole file.
 
-The formats casting writes need only a few hundred lines each when the code edits the frames it
+The formats susurrus writes need only a few hundred lines each when the code edits the frames it
 owns and copies everything else verbatim, which is also what makes the byte-for-byte verification
-above possible. So: small writers in `Sources/Casting/Library/TagWriting/` (`ID3Tag`, `FLACTag`,
+above possible. So: small writers in `Sources/Susurrus/Library/TagWriting/` (`ID3Tag`, `FLACTag`,
 `MP4Tag`), no dependencies.
 
 ## Playback from a network share
 
 Files on the Mac's own disks and external drives are played in place. Files on a network
-volume (SMB, AFP, NFS) can arrive slowly (the share casting was developed against measured
+volume (SMB, AFP, NFS) can arrive slowly (the share susurrus was developed against measured
 0.2–3 MB/s), so for those:
 - A track you start plays **straight from the share** if it's MP3/AAC/WAV/AIFF (needs ~40 KB/s),
   so it starts as soon as the share responds. If it takes over 8 s the bar says
@@ -365,7 +377,7 @@ volume (SMB, AFP, NFS) can arrive slowly (the share casting was developed agains
   takes over 8 s).
 - **FLAC is copied locally first**: AudioToolbox scans FLAC files end to end for packets, which
   over the network stalled playback.
-- The **next track is copied** to `~/Library/Caches/casting/Playback` (last 8, cleared on
+- The **next track is copied** to `~/Library/Caches/susurrus/Playback` (last 8, cleared on
   launch) in the background — after the current stream has had 20 s to settle — and chained
   onto the audio node in the last ~12 s, so transitions are gapless and queue edits are free.
 
@@ -373,18 +385,19 @@ volume (SMB, AFP, NFS) can arrive slowly (the share casting was developed agains
 
 | Path | What |
 | --- | --- |
-| `Sources/Casting/Library/` | SQLite wrapper, store (+ editing, history, listen log, removal, saved tag writes), listening stats, artist index and discography matching, MusicBrainz release matching, smart playlist predicates, tag reader, albums, artwork, BPM and key detection, search scopes, duplicate and missing-file checks |
-| `Sources/Casting/Library/TagWriting/` | ID3 / FLAC / MP4 tag writers, safe file replacement, background write queue |
-| `Sources/Casting/Playback/` | Player (queue, gapless, shuffle/repeat), two-deck mixer and track analysis (waveforms, beat grid), file cache, EQ, output devices, Now Playing |
-| `Sources/Casting/Exchange/` | M3U playlists, Apple Music / iTunes `Library.xml` reader and import plan, Rekordbox XML writer, path matching, atomic export writes, remembered beat grids |
-| `Sources/Casting/Metadata/` | MusicBrainz / Wikipedia / ListenBrainz client for artist pages (rate limit, disk cache), MusicBrainz release search and Cover Art Archive covers |
-| `Sources/Casting/Soulseek/` | Soulseek client: wire codec, messages, client actor (server + peer connections), UI model, private conversations (saved to disk) |
-| `Sources/Casting/AppModel*.swift` | App state, selection, actions and undo, scanning, library housekeeping, import and export, Look Up Album, covers and tidying Soulseek downloads |
-| `Sources/Casting/Updater.swift` | Sparkle in-app updates (Check for Updates…, automatic checks) |
-| `Sources/Casting/Reporting/` | Bug reports: event log, diagnostics, redaction, crash report summaries, the GitHub issue link |
-| `Sources/Casting/UI/` | Track table (NSTableView), sidebar, albums, browser, Up Next, Get Info, smart editor, EQ, mixer, Rekordbox export sheet, Soulseek (+ messages and user info), settings, menu bar |
+| `Sources/Susurrus/Library/` | SQLite wrapper, store (+ editing, history, listen log, removal, saved tag writes), listening stats, artist index and discography matching, MusicBrainz release matching, smart playlist predicates, tag reader, albums, artwork, BPM and key detection, search scopes, duplicate and missing-file checks |
+| `Sources/Susurrus/Library/TagWriting/` | ID3 / FLAC / MP4 tag writers, safe file replacement, background write queue |
+| `Sources/Susurrus/Playback/` | Player (queue, gapless, shuffle/repeat), two-deck mixer and track analysis (waveforms, beat grid), file cache, EQ, output devices, Now Playing |
+| `Sources/Susurrus/Exchange/` | M3U playlists, Apple Music / iTunes `Library.xml` reader and import plan, Rekordbox XML writer, path matching, atomic export writes, remembered beat grids |
+| `Sources/Susurrus/Metadata/` | MusicBrainz / Wikipedia / ListenBrainz client for artist pages (rate limit, disk cache), MusicBrainz release search and Cover Art Archive covers |
+| `Sources/Susurrus/Soulseek/` | Soulseek client: wire codec, messages, client actor (server + peer connections), UI model, private conversations (saved to disk) |
+| `Sources/Susurrus/LegacyMigration.swift` | Takes over casting's folders, settings and Soulseek password on the first launch |
+| `Sources/Susurrus/AppModel*.swift` | App state, selection, actions and undo, scanning, library housekeeping, import and export, Look Up Album, covers and tidying Soulseek downloads |
+| `Sources/Susurrus/Updater.swift` | Sparkle in-app updates (Check for Updates…, automatic checks) |
+| `Sources/Susurrus/Reporting/` | Bug reports: event log, diagnostics, redaction, crash report summaries, the GitHub issue link |
+| `Sources/Susurrus/UI/` | Track table (NSTableView), sidebar, albums, browser, Up Next, Get Info, smart editor, EQ, mixer, Rekordbox export sheet, Soulseek (+ messages and user info), settings, menu bar |
 | `Sources/ObjCSupport/` | Catches NSExceptions (predicate evaluation, audio graph connections) |
-| `Tests/CastingTests/` | 190 tests (plus one against the live MusicBrainz and Cover Art Archive, run with `CASTING_LIVE_TESTS=1`): listening stats, the listen log (store, v2→v3 upgrade, player skip/pause/stop tracking), discography matching, artist index, smart playlist predicates, albums/artwork, library editing, history/removal/saved tag writes and the v1→v2 upgrade, search scopes, duplicates, missing-file checks, tag reading and writing (on generated files), BPM detection (generated drum patterns, WAV and FLAC excerpts), beat grids (click tracks) and keys (chord progressions), player, mixer, import and export (M3U round trips and other apps' playlists, a generated `Library.xml` and the import plan, the Rekordbox XML shape), bug reports (redaction, issue links, crash summaries, event log), release matching (tagged and untagged files, multi-disc, near misses, edits, folder names) and covers in MP3/FLAC/M4A tags, fetched and folder covers, Soulseek codec + loopback client tests (search, wishlist, browse, download, resume, denial, blocking, serving searches + uploads, upload speed limit, private messages and acks, offline messages, user info and stats) against a mock server, and saved conversations |
+| `Tests/SusurrusTests/` | 191 tests (plus one against the live MusicBrainz and Cover Art Archive, run with `SUSURRUS_LIVE_TESTS=1`): listening stats, the listen log (store, v2→v3 upgrade, player skip/pause/stop tracking), discography matching, artist index, smart playlist predicates, albums/artwork, library editing, history/removal/saved tag writes and the v1→v2 upgrade, search scopes, duplicates, missing-file checks, tag reading and writing (on generated files), BPM detection (generated drum patterns, WAV and FLAC excerpts), beat grids (click tracks) and keys (chord progressions), player, mixer, taking over casting's folders and settings, import and export (M3U round trips and other apps' playlists, a generated `Library.xml` and the import plan, the Rekordbox XML shape), bug reports (redaction, issue links, crash summaries, event log), release matching (tagged and untagged files, multi-disc, near misses, edits, folder names) and covers in MP3/FLAC/M4A tags, fetched and folder covers, Soulseek codec + loopback client tests (search, wishlist, browse, download, resume, denial, blocking, serving searches + uploads, upload speed limit, private messages and acks, offline messages, user info and stats) against a mock server, and saved conversations |
 
 ## Known issues
 

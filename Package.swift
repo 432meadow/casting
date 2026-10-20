@@ -4,7 +4,7 @@ import PackageDescription
 let commandLineToolsFrameworks = "/Library/Developer/CommandLineTools/Library/Developer/Frameworks"
 
 let package = Package(
-    name: "Casting",
+    name: "Susurrus",
     platforms: [.macOS(.v14)],
     dependencies: [
         // In-app updates from GitHub releases (see scripts/release.sh and .github/workflows/release.yml).
@@ -15,14 +15,14 @@ let package = Package(
         // NSPredicate / KVC when evaluating imported smart playlists.
         .target(name: "ObjCSupport", linkerSettings: [.linkedFramework("AVFoundation")]),
         .executableTarget(
-            name: "Casting",
+            name: "Susurrus",
             dependencies: ["ObjCSupport", .product(name: "Sparkle", package: "Sparkle")],
             // scripts/bundle.sh copies Sparkle.framework into Contents/Frameworks.
             linkerSettings: [.linkedLibrary("sqlite3"), .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]
         ),
         .testTarget(
-            name: "CastingTests",
-            dependencies: ["Casting"],
+            name: "SusurrusTests",
+            dependencies: ["Susurrus"],
             // With only the Command Line Tools (no Xcode), swift-testing lives outside the default search path.
             swiftSettings: [.unsafeFlags(["-F", commandLineToolsFrameworks, "-Xfrontend", "-disable-cross-import-overlays"])],
             linkerSettings: [.unsafeFlags(["-F", commandLineToolsFrameworks, "-Xlinker", "-rpath", "-Xlinker", commandLineToolsFrameworks])]

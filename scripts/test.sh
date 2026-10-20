@@ -13,6 +13,6 @@ if [[ ! -x $runner || scripts/testrunner/main.swift -nt $runner ]]; then
         -Xlinker -rpath -Xlinker $frameworks scripts/testrunner/main.swift -o $runner
 fi
 
-TEST_BUNDLE_BINARY="$PWD/.build/debug/CastingPackageTests.xctest/Contents/MacOS/CastingPackageTests" \
+TEST_BUNDLE_BINARY="$PWD/.build/debug/SusurrusPackageTests.xctest/Contents/MacOS/SusurrusPackageTests" \
 DYLD_FRAMEWORK_PATH=$frameworks \
     $runner "$@"
