@@ -174,6 +174,12 @@ xattr -dr com.apple.quarantine /Applications/casting.app
 - Output device picker and AirPlay button in the now-playing bar.
 - Media keys, Control Center / Now Playing widget, headphone buttons.
 - Menu bar mini-player; the app keeps running when the window is closed.
+- **Help ▸ Report a Bug…** opens a new GitHub issue in the browser, filled in with what you wrote
+  and, if you want, diagnostics: versions, Mac model, library size and formats, whether the music
+  is on a local disk or a share, a few settings, the last 40 errors, and the latest crash
+  report's summary. Paths and the Mac's user and computer names are taken out, the diagnostics
+  can be edited before sending, and casting itself sends nothing. The errors come from a small
+  log in `~/Library/Logs/casting/events.log` that survives a crash.
 - Queue and position are restored (paused) on the next launch.
 
 **Soulseek** (phases 1–3: search + downloads + sharing)
@@ -297,9 +303,10 @@ volume (SMB, AFP, NFS) can arrive slowly (the share casting was developed agains
 | `Sources/Casting/Soulseek/` | Soulseek client: wire codec, messages, client actor (server + peer connections), UI model |
 | `Sources/Casting/AppModel*.swift` | App state, selection, actions and undo, scanning, library housekeeping |
 | `Sources/Casting/Updater.swift` | Sparkle in-app updates (Check for Updates…, automatic checks) |
+| `Sources/Casting/Reporting/` | Bug reports: event log, diagnostics, redaction, crash report summaries, the GitHub issue link |
 | `Sources/Casting/UI/` | Track table (NSTableView), sidebar, albums, browser, Up Next, Get Info, smart editor, EQ, mixer, settings, menu bar |
 | `Sources/ObjCSupport/` | Catches NSExceptions (predicate evaluation, audio graph connections) |
-| `Tests/CastingTests/` | 137 tests: listening stats, the listen log (store, v2→v3 upgrade, player skip/pause/stop tracking), discography matching, artist index, smart playlist predicates, albums/artwork, library editing, history/removal/saved tag writes and the v1→v2 upgrade, search scopes, duplicates, missing-file checks, tag reading and writing (on generated files), BPM detection (generated drum patterns, WAV and FLAC excerpts), beat grids (click tracks) and keys (chord progressions), player, mixer, Soulseek codec + loopback client tests (search, wishlist, browse, download, resume, denial, blocking, serving searches + uploads, upload speed limit) against a mock server |
+| `Tests/CastingTests/` | 141 tests: listening stats, the listen log (store, v2→v3 upgrade, player skip/pause/stop tracking), discography matching, artist index, smart playlist predicates, albums/artwork, library editing, history/removal/saved tag writes and the v1→v2 upgrade, search scopes, duplicates, missing-file checks, tag reading and writing (on generated files), BPM detection (generated drum patterns, WAV and FLAC excerpts), beat grids (click tracks) and keys (chord progressions), player, mixer, bug reports (redaction, issue links, crash summaries, event log), Soulseek codec + loopback client tests (search, wishlist, browse, download, resume, denial, blocking, serving searches + uploads, upload speed limit) against a mock server |
 
 ## Known issues
 

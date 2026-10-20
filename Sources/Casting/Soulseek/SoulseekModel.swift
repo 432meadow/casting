@@ -71,7 +71,11 @@ final class SoulseekModel {
         }
     }
 
-    private(set) var state: ConnectionState = .disconnected
+    private(set) var state: ConnectionState = .disconnected {
+        didSet {
+            if case .failed(let reason) = state, state != oldValue { EventLog.shared.log("Soulseek: \(reason)") }
+        }
+    }
     private(set) var results: [SlskSearchResult] = []
     private(set) var resultUserCount = 0
     /// The query the current results belong to; nil before the first search.

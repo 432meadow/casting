@@ -30,7 +30,9 @@ final class Mixer {
     /// 0 is all deck A, 1 is all deck B.
     private(set) var crossfader: Double = 0.5
     private(set) var isAutoFading = false
-    var errorMessage: String?
+    var errorMessage: String? {
+        didSet { if let errorMessage, errorMessage != oldValue { EventLog.shared.log("Mixer: \(errorMessage)") } }
+    }
     var masterVolume: Float = 0.8 {
         didSet {
             engine.mainMixerNode.outputVolume = masterVolume
@@ -526,6 +528,7 @@ final class Deck {
     fileprivate func failLoading(_ message: String) {
         isLoading = false
         errorMessage = message
+        EventLog.shared.log("Deck \(side.name): \(message) — \(track?.path ?? "")")
     }
 
     /// The track to count as played, once, after half of it (or 4 minutes) has gone by.

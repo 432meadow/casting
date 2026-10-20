@@ -97,6 +97,7 @@ final class TagWriteQueue {
                 break
             case .failure(let error):
                 failures.append(Failure(path: path, message: error.localizedDescription))
+                EventLog.shared.log("Tag write: \(error.localizedDescription) — \(path)")
                 if failures.count > 200 { failures.removeFirst(failures.count - 200) }
             }
             // Edits that arrived while this write ran are still pending; keep those saved.

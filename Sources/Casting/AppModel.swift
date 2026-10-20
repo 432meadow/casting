@@ -52,7 +52,9 @@ final class AppModel {
     }
     /// Problems loading the current selection (e.g. a smart playlist that can't be evaluated).
     private(set) var selectionError: String?
-    var fatalError: String?
+    var fatalError: String? {
+        didSet { if let fatalError, fatalError != oldValue { EventLog.shared.log(fatalError) } }
+    }
 
     var selection: SidebarItem? = .allTracks { didSet { loadSelection() } }
     var searchText = "" { didSet { refreshVisible() } }
@@ -241,6 +243,8 @@ final class AppModel {
         } catch {
             fatalError = "Couldn't open the library: \(error.localizedDescription)"
         }
+        let info = Bundle.main.infoDictionary ?? [:]
+        EventLog.shared.log("Launched casting \(info["CFBundleShortVersionString"] as? String ?? "(development build)")", level: .info)
         player.locate = makeLocator()
         player.onTrackPlayed = { [weak self] track in self?.recordPlay(track) }
         player.onListenEnded = { [weak self] track, listen in self?.recordListen(listen, of: track) }
@@ -284,6 +288,7 @@ final class AppModel {
                 self?.savePlaybackState()
                 self?.player.endCurrentListen()
                 self?.mixer.endListens()
+                EventLog.shared.log("Quit", level: .info)
             }
         }
 

@@ -45,7 +45,15 @@ struct CastingApp: App {
             TrackCommands(model: model)
             ControlsCommands(model: model)
             MixerCommands(model: model)
+            HelpCommands()
         }
+
+        Window("Report a Bug", id: "bug-report") {
+            BugReportView()
+                .environment(model)
+                .tint(Palette.warm)
+        }
+        .windowResizability(.contentSize)
 
         Window("Equalizer", id: "equalizer") {
             EqualizerView()
@@ -167,6 +175,20 @@ private struct ControlsCommands: Commands {
                 .keyboardShortcut("u", modifiers: [.command, .option])
             Button("Equalizer") { openWindow(id: "equalizer") }
                 .keyboardShortcut("e", modifiers: [.command, .option])
+        }
+    }
+}
+
+/// Replaces the stock "casting Help" item, which only says there's no help book.
+private struct HelpCommands: Commands {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some Commands {
+        CommandGroup(replacing: .help) {
+            Button("Report a Bug…") { openWindow(id: "bug-report") }
+            Button("casting on GitHub") {
+                NSWorkspace.shared.open(URL(string: "https://github.com/\(BugReport.repository)")!)
+            }
         }
     }
 }

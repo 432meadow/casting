@@ -42,7 +42,9 @@ final class Player {
             queueDidChange()
         }
     }
-    var errorMessage: String?
+    var errorMessage: String? {
+        didSet { if let errorMessage, errorMessage != oldValue { EventLog.shared.log("Player: \(errorMessage)") } }
+    }
     var volume: Float = 0.8 {
         didSet {
             engine.mainMixerNode.outputVolume = volume
