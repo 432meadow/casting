@@ -227,14 +227,14 @@ actor ArtistInfoService {
 
     // MARK: Fetching
 
-    private static func musicBrainzURL(_ path: String, _ query: [String: String]) -> URL {
+    static func musicBrainzURL(_ path: String, _ query: [String: String]) -> URL {
         var components = URLComponents(string: "https://musicbrainz.org/ws/2/\(path)")!
         components.queryItems = query.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
             + [URLQueryItem(name: "fmt", value: "json")]
         return components.url!
     }
 
-    private func fetch<T: Decodable>(_ type: T.Type, from url: URL) async throws -> T {
+    func fetch<T: Decodable>(_ type: T.Type, from url: URL) async throws -> T {
         let cacheURL = cacheFile(for: url)
         let cached = try? Data(contentsOf: cacheURL)
         if let cached,
@@ -256,7 +256,7 @@ actor ArtistInfoService {
         }
     }
 
-    private func download(_ url: URL) async throws -> Data {
+    func download(_ url: URL) async throws -> Data {
         let isMusicBrainz = url.host == "musicbrainz.org"
         for attempt in 0..<3 {
             if isMusicBrainz {

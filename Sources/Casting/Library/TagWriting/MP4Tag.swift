@@ -35,6 +35,7 @@ enum MP4Tag: TagFormat {
         case \TagValues.disc: [fourCC("disk")]
         case \TagValues.bpm: [fourCC("tmpo")]
         case \TagValues.compilation: [fourCC("cpil")]
+        case \TagValues.artwork: [fourCC("covr")]
         default: []
         }
     }
@@ -146,6 +147,10 @@ enum MP4Tag: TagFormat {
         pair(\.disc, trailing: 0)
         if let bpm = values.bpm { set(\TagValues.bpm, dataType: 21, value: bpm > 0 ? [UInt8].be16(min(bpm, 0x7FFF)) : nil) }
         if let compilation = values.compilation { set(\TagValues.compilation, dataType: 21, value: compilation ? [1] : nil) }
+        // covr holds every picture; the new cover replaces them all (13 = JPEG, 14 = PNG).
+        if let artwork = values.artwork {
+            set(\TagValues.artwork, dataType: artwork.isPNG ? 14 : 13, value: artwork.data.isEmpty ? nil : [UInt8](artwork.data))
+        }
         let ilst = atom(type: fourCC("ilst"), payload: items.flatMap(\.raw))
 
         // Rebuild meta → udta → moov around it, copying every sibling as is.
@@ -247,10 +252,12 @@ enum MP4Tag: TagFormat {
         let layout = try layout(bytes)
         guard let ilst = layout.ilst else { return TagValues() }
         var data: [[UInt8]: [UInt8]] = [:]
+        var dataTypes: [[UInt8]: UInt8] = [:]
         for item in try children(of: ilst, in: bytes) where data[item.type] == nil {
             guard let d = try children(of: item, in: bytes).first(where: { $0.type == fourCC("data") }),
                   d.payloadStart + 8 <= d.end else { continue }
             data[item.type] = Array(bytes[d.payloadStart + 8..<d.end])
+            dataTypes[item.type] = bytes[d.payloadStart + 3]
         }
         func text(_ type: String) -> String? { data[fourCC(type)].map { String(decoding: $0, as: UTF8.self) } }
         func pair(_ type: String) -> TagValues.NumberPair? {
@@ -270,6 +277,9 @@ enum MP4Tag: TagFormat {
         values.disc = pair("disk")
         values.bpm = data[fourCC("tmpo")].flatMap { $0.count >= 2 ? Int($0[0]) << 8 | Int($0[1]) : nil }
         values.compilation = data[fourCC("cpil")].map { $0.first == 1 }
+        if let cover = data[fourCC("covr")] {
+            values.artwork = Artwork(data: Data(cover), mimeType: dataTypes[fourCC("covr")] == 14 ? "image/png" : "image/jpeg")
+        }
         return values
     }
 

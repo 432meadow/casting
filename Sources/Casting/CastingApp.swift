@@ -41,6 +41,14 @@ struct CastingApp: App {
                 .disabled(model.isCheckingForMissingFiles)
                 Button("Remove Missing Tracks from Library…") { model.confirmRemoveFromLibrary(model.missingTracks) }
                     .disabled(model.missingTrackCount == 0)
+                Divider()
+                if model.coverSearch == nil {
+                    Button("Find Missing Covers for All Albums") {
+                        model.findMissingCovers(for: Album.group(model.tracks, sortedBy: .artist))
+                    }
+                } else {
+                    Button("Stop Finding Covers") { model.stopFindingCovers() }
+                }
             }
             TrackCommands(model: model)
             ControlsCommands(model: model)
@@ -106,6 +114,11 @@ private struct TrackCommands: Commands {
             if model.keyAnalyzer.isRunning {
                 Button("Stop Detecting Keys") { model.keyAnalyzer.cancel() }
             }
+            Button("Look Up Album on MusicBrainz…") { model.lookUpAlbum(for: selected) }
+                .keyboardShortcut("l", modifiers: [.command, .shift])
+                .disabled(selected.isEmpty)
+            Button("Find Missing Covers") { model.findMissingCovers(for: model.albums(of: selected)) }
+                .disabled(selected.isEmpty || model.coverSearch != nil)
             Divider()
             Button("Play Next") { model.playNext(selected) }
                 .keyboardShortcut(.return, modifiers: .option)

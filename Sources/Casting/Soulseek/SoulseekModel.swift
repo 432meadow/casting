@@ -119,6 +119,17 @@ final class SoulseekModel {
         didSet { UserDefaults.standard.set(downloadFolderPath, forKey: "soulseek.downloadFolder") }
     }
 
+    /// Finished album folders are matched to a MusicBrainz release; when every file fits, the
+    /// tags are fixed and the cover fetched (see `AppModel.cleanUpDownloads`).
+    var tagsDownloads: Bool = UserDefaults.standard.object(forKey: "soulseek.tagDownloads") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(tagsDownloads, forKey: "soulseek.tagDownloads") }
+    }
+
+    /// Matched downloads are also moved into "Artist/Album (Year)" folders in the download folder.
+    var organizesDownloads: Bool = UserDefaults.standard.bool(forKey: "soulseek.organizeDownloads") {
+        didSet { UserDefaults.standard.set(organizesDownloads, forKey: "soulseek.organizeDownloads") }
+    }
+
     static var defaultDownloadFolder: String {
         FileManager.default.urls(for: .musicDirectory, in: .userDomainMask).first?
             .appendingPathComponent("Soulseek").path
@@ -639,6 +650,15 @@ final class SoulseekModel {
                 })
             }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    /// Points finished downloads at their files' new places after they were moved (old path → new URL).
+    func noteMoved(_ moves: [String: URL]) {
+        for index in downloads.indices {
+            guard case .finished(let url) = downloads[index].state, let moved = moves[url.path] else { continue }
+            downloads[index].localURL = moved
+            downloads[index].state = .finished(moved)
+        }
     }
 
     func clearInactiveDownloads() {

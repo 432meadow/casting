@@ -280,6 +280,8 @@ struct SoulseekView: View {
                     Button("Show in Finder") {
                         NSWorkspace.shared.activateFileViewerSelecting([url])
                     }
+                    Button("Look Up Album on MusicBrainz…") { model.lookUpDownload(folder: url.deletingLastPathComponent()) }
+                        .disabled(model.track(atPath: url.path) == nil)
                 }
                 if !download.isActive {
                     Button("Remove") { soulseek.remove(download.id) }

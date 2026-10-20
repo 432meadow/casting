@@ -107,6 +107,18 @@ final class AppModel {
         setUnavailable(statuses)
     }
 
+    // MARK: MusicBrainz album lookups and covers
+
+    /// The open Look Up Album sheet.
+    var releaseLookup: ReleaseLookup?
+    /// Find Missing Covers' progress while it runs.
+    var coverSearch: CoverSearch?
+    /// What the last Find Missing Covers found, shown in the subtitle for a while.
+    var coverSearchSummary: String?
+    @ObservationIgnored var coverSearchTask: Task<Void, Never>?
+    /// Download folders already matched (or tried) this session, so each is cleaned up once.
+    @ObservationIgnored var cleanedDownloadFolders = Set<String>()
+
     // MARK: Artists
 
     /// Built on first use and dropped whenever track tags change (see `artists`).
@@ -252,6 +264,7 @@ final class AppModel {
         soulseek.importFolders = { [weak self] folders in
             guard let self, !self.isScanning, self.store != nil else { return false }
             self.addToLibrary(folders)
+            if self.soulseek.tagsDownloads { self.cleanUpDownloads(in: folders) }
             return true
         }
         // Shared files that are in the library advertise bitrate/duration/depth in search results.

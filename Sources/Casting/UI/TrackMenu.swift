@@ -28,6 +28,10 @@ enum TrackMenu {
         menu.addItem(ClosureMenuItem(detectBPMTitle(for: tracks)) { model.detectBPM(for: tracks) })
         menu.addItem(ClosureMenuItem(detectKeyTitle(for: tracks)) { model.detectKey(for: tracks) })
         menu.addItem(ClosureMenuItem("Get Info") { model.showInfo(for: tracks) })
+        menu.addItem(ClosureMenuItem("Look Up Album on MusicBrainz…") { model.lookUpAlbum(for: tracks) })
+        if model.coverSearch == nil {
+            menu.addItem(ClosureMenuItem("Find Missing Covers") { model.findMissingCovers(for: model.albums(of: tracks)) })
+        }
         if tracks.count == 1, !tracks[0].displayArtist.isEmpty {
             menu.addItem(ClosureMenuItem("Go to Artist") { model.showArtist(tracks[0].displayArtist) })
         }

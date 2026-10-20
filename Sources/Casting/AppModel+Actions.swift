@@ -34,7 +34,7 @@ extension AppModel {
 
     /// Saves each edit for its tracks and registers an undo that puts back the values they
     /// replaced (undoing goes through here too, so it registers the redo).
-    func apply(_ changes: [(edit: TrackEdit, tracks: [Track])], actionName: String) {
+    func apply(_ changes: [(edit: TrackEdit, tracks: [Track])], actionName: String, registersUndo: Bool = true) {
         let changes = changes.filter { !$0.edit.isEmpty && !$0.tracks.isEmpty }
         guard !changes.isEmpty else { return }
         var previous: [TrackEdit: [Track]] = [:]
@@ -53,6 +53,7 @@ extension AppModel {
         artistIndex = nil
         // Sorting, search matches and album grouping may all depend on what changed.
         refreshVisible()
+        guard registersUndo else { return }
         let inverse = previous.map { (edit: $0.key, tracks: $0.value) }
         registerUndo(actionName) { $0.apply(inverse, actionName: actionName) }
     }

@@ -25,6 +25,8 @@ struct TagValues: Equatable, Sendable, Codable {
     var compilation: Bool?
     /// 0–5 in half-star steps.
     var rating: Double?
+    /// The front cover. Empty data removes the file's front covers; other pictures are kept.
+    var artwork: Artwork?
 
     var isEmpty: Bool { self == TagValues() }
 
@@ -35,7 +37,7 @@ struct TagValues: Equatable, Sendable, Codable {
             (\.albumArtist, albumArtist != nil), (\.genre, genre != nil), (\.composer, composer != nil),
             (\.grouping, grouping != nil), (\.comment, comment != nil), (\.year, year != nil),
             (\.track, track != nil), (\.disc, disc != nil), (\.bpm, bpm != nil), (\.key, key != nil),
-            (\.compilation, compilation != nil), (\.rating, rating != nil),
+            (\.compilation, compilation != nil), (\.rating, rating != nil), (\.artwork, artwork != nil),
         ]
         return all.filter(\.1).map(\.0)
     }
@@ -67,7 +69,7 @@ struct TagValues: Equatable, Sendable, Codable {
     init(title: String? = nil, artist: String? = nil, album: String? = nil, albumArtist: String? = nil,
          genre: String? = nil, composer: String? = nil, grouping: String? = nil, comment: String? = nil,
          year: Int? = nil, track: NumberPair? = nil, disc: NumberPair? = nil, bpm: Int? = nil,
-         key: String? = nil, compilation: Bool? = nil, rating: Double? = nil) {
+         key: String? = nil, compilation: Bool? = nil, rating: Double? = nil, artwork: Artwork? = nil) {
         self.title = title
         self.artist = artist
         self.album = album
@@ -83,6 +85,7 @@ struct TagValues: Equatable, Sendable, Codable {
         self.key = key
         self.compilation = compilation
         self.rating = rating
+        self.artwork = artwork
     }
 
     /// Later values win; used to merge edits queued for the same file.
@@ -103,6 +106,7 @@ struct TagValues: Equatable, Sendable, Codable {
         if let v = newer.key { result.key = v }
         if let v = newer.compilation { result.compilation = v }
         if let v = newer.rating { result.rating = v }
+        if let v = newer.artwork { result.artwork = v }
         return result
     }
 
@@ -120,6 +124,7 @@ struct TagValues: Equatable, Sendable, Codable {
             && same(track, stored.track) && same(disc, stored.disc) && same(bpm, stored.bpm) && same(key, stored.key)
             && (compilation == nil || compilation == (stored.compilation ?? false))
             && (rating == nil || rating == (stored.rating ?? 0))
+            && (artwork.map { $0.data.isEmpty ? stored.artwork == nil : stored.artwork?.data == $0.data } ?? true)
     }
 
     /// "3/12", "3", or "" for (0, 0). A total without a number is written as "0/12".
@@ -127,6 +132,29 @@ struct TagValues: Equatable, Sendable, Codable {
         if pair.number == 0 && pair.total == 0 { return "" }
         return pair.total > 0 ? "\(pair.number)/\(pair.total)" : "\(pair.number)"
     }
+}
+
+/// An embedded picture: the image bytes as stored in the file, and their type.
+struct Artwork: Equatable, Sendable, Codable {
+    var data: Data
+    /// "image/jpeg" or "image/png".
+    var mimeType: String
+
+    /// Takes the type from the image's first bytes (JPEG unless it's a PNG).
+    init(data: Data) {
+        self.data = data
+        mimeType = data.starts(with: [0x89, 0x50, 0x4E, 0x47]) ? "image/png" : "image/jpeg"
+    }
+
+    init(data: Data, mimeType: String) {
+        self.data = data
+        self.mimeType = mimeType
+    }
+
+    /// Removes the front cover.
+    static let removed = Artwork(data: Data(), mimeType: "")
+
+    var isPNG: Bool { mimeType == "image/png" }
 }
 
 /// Star ratings ↔ the byte stored in ID3 POPM frames. These are the values MusicBee writes and
