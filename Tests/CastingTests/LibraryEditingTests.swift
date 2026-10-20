@@ -21,6 +21,15 @@ import Testing
         #expect(try store.allPaths().count == 6)
     }
 
+    @Test func keysAreStoredAndEdited() throws {
+        try store.insert([ScannedTrack(path: "/music/keyed.mp3", title: "Keyed", musicalKey: "Am")])
+        var keyed = try #require(try store.loadTracks().first { $0.title == "Keyed" })
+        #expect(keyed.musicalKey == "Am" && keyed.key == MusicalKey(tonic: 9, isMinor: true))
+        try store.update(TrackEdit(musicalKey: "F#"), forTracks: [keyed.id])
+        keyed = try #require(try store.loadTracks().first { $0.id == keyed.id })
+        #expect(keyed.key?.camelot == "2B")
+    }
+
     @Test func playlistEntriesAddRemoveMove() throws {
         let playlist = try store.createPlaylist(named: "Mix", trackIDs: [ids[0], ids[1]])
         try store.appendTracks([ids[2], ids[0]], toPlaylist: playlist)

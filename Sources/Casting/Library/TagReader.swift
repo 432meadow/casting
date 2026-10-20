@@ -17,6 +17,7 @@ struct ScannedTrack: Sendable {
     var discNumber = 0
     var discCount = 0
     var bpm = 0
+    var musicalKey = ""
     var compilation = false
     var duration = 0.0
     var bitRate = 0
@@ -83,6 +84,13 @@ enum TagReader {
         track.comment = await string([.id3MetadataComments, .iTunesMetadataUserComment]) ?? ""
         track.genre = Self.cleanGenre(await string([.id3MetadataContentType, .iTunesMetadataUserGenre, .quickTimeMetadataGenre]) ?? "")
         track.bpm = Int(await string([.id3MetadataBeatsPerMinute, .iTunesMetadataBeatsPerMin]) ?? "") ?? 0
+        // ID3's TKEY, or the free-form "initialkey" item that MP4 and Vorbis taggers write.
+        let keyIdentifiers = metadata.compactMap(\.identifier).filter {
+            $0 == .id3MetadataInitialKey || $0.rawValue.lowercased().hasSuffix("initialkey")
+        }
+        if let key = await string(keyIdentifiers) {
+            track.musicalKey = MusicalKey(parsing: key)?.name ?? key
+        }
         if let year = await string([.id3MetadataYear, .id3MetadataRecordingTime, .iTunesMetadataReleaseDate, .commonIdentifierCreationDate]) {
             track.year = Int(year.prefix(4)) ?? 0
         }

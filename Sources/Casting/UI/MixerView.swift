@@ -9,15 +9,21 @@ struct MixerView: View {
 
     var body: some View {
         let mixer = model.mixer
-        HStack(spacing: 0) {
-            DeckView(deck: mixer.a, other: mixer.b, accent: Palette.warm)
-            Divider()
-            MixerSection(mixer: mixer)
-                .frame(width: 280)
-            Divider()
-            DeckView(deck: mixer.b, other: mixer.a, accent: Palette.cool)
+        VStack(spacing: 0) {
+            if model.isShowingBeatView {
+                BeatView(mixer: mixer)
+                Divider()
+            }
+            HStack(spacing: 0) {
+                DeckView(deck: mixer.a, other: mixer.b, accent: Palette.warm)
+                Divider()
+                MixerSection(mixer: mixer)
+                    .frame(width: 280)
+                Divider()
+                DeckView(deck: mixer.b, other: mixer.a, accent: Palette.cool)
+            }
+            .frame(height: 176)
         }
-        .frame(height: 176)
         .background(.bar)
         .overlay(alignment: .top) { Divider() }
     }
@@ -26,6 +32,110 @@ struct MixerView: View {
 extension UTType {
     /// One track ID per dragged row, as the track table writes it.
     static let castingTrackID = UTType(importedAs: "io.github.432meadow.casting.track-ids")
+}
+
+// MARK: - Beats
+
+/// Both decks close up, one above the other, scrolling past a shared playhead at the same speed,
+/// with each track's beat grid drawn over it. The beats are lined up when the grid lines meet.
+private struct BeatView: View {
+    let mixer: Mixer
+    /// How much playing time the strips span.
+    static let seconds = 4.0
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1 / 60, paused: !mixer.a.isPlaying && !mixer.b.isPlaying)) { _ in
+            HStack(spacing: 12) {
+                VStack(spacing: 3) {
+                    BeatStrip(deck: mixer.a, time: mixer.a.currentTime, accent: Palette.warm)
+                    BeatStrip(deck: mixer.b, time: mixer.b.currentTime, accent: Palette.cool)
+                }
+                .overlay { Rectangle().fill(.primary).frame(width: 1.5).allowsHitTesting(false) }
+                PhaseReadout(offset: mixer.beatOffset)
+                    .frame(width: 58)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+    }
+}
+
+private struct BeatStrip: View {
+    let deck: Deck
+    let time: TimeInterval
+    let accent: Color
+    @State private var dragStart: TimeInterval?
+
+    var body: some View {
+        GeometryReader { geometry in
+            Canvas { context, size in draw(in: &context, size: size) }
+                .contentShape(Rectangle())
+                .gesture(
+                    // Paused, dragging moves the track under the playhead, for cueing on a beat.
+                    DragGesture(minimumDistance: 1)
+                        .onChanged { drag in
+                            guard deck.isReady, !deck.isPlaying, geometry.size.width > 0 else { return }
+                            let start = dragStart ?? time
+                            dragStart = start
+                            let secondsPerPoint = BeatView.seconds * deck.playbackRate / geometry.size.width
+                            deck.seek(to: max(0, start - drag.translation.width * secondsPerPoint))
+                        }
+                        .onEnded { _ in dragStart = nil }
+                )
+        }
+        .frame(height: 28)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 4))
+        .help(deck.isReady && !deck.isPlaying ? "Drag to move deck \(deck.side.name) under the playhead" : "")
+    }
+
+    private func draw(in context: inout GraphicsContext, size: CGSize) {
+        guard let analysis = deck.analysis, deck.track != nil else { return }
+        let half = BeatView.seconds / 2 * deck.playbackRate  // track seconds either side
+        let middle = size.width / 2
+        let scale = middle / half  // points per track second
+        let rate = analysis.detailRate
+        let first = max(0, Int(((time - half) * rate).rounded(.down)))
+        let last = min(analysis.detail.count - 1, Int(((time + half) * rate).rounded(.up)))
+        if first <= last {
+            let width = max(1, scale / rate * 0.75)
+            var bars = Path()
+            for index in first...last {
+                let x = middle + (Double(index) / rate - time) * scale
+                let height = max(1, CGFloat(analysis.detail[index]) * (size.height - 4))
+                bars.addRect(CGRect(x: x, y: (size.height - height) / 2, width: width, height: height))
+            }
+            context.fill(bars, with: .color(accent.opacity(0.8)))
+        }
+        if let grid = analysis.grid {
+            var lines = Path()
+            for beat in grid.beats(from: time - half, to: time + half) {
+                lines.addRect(CGRect(x: middle + (beat - time) * scale - 0.5, y: 0, width: 1, height: size.height))
+            }
+            context.fill(lines, with: .color(.primary.opacity(0.55)))
+        }
+    }
+}
+
+/// How far apart the two decks' beats are, while both play.
+private struct PhaseReadout: View {
+    let offset: TimeInterval?
+
+    var body: some View {
+        VStack(spacing: 1) {
+            Text("Phase").font(.caption2).foregroundStyle(.secondary)
+            if let offset {
+                let ms = Int((abs(offset) * 1000).rounded())
+                if ms <= 5 {
+                    Text("Locked").font(.caption.weight(.semibold))
+                } else {
+                    Text("\(offset > 0 ? "A" : "B") +\(ms) ms").font(.caption.monospacedDigit())
+                }
+            } else {
+                Text("—").font(.caption).foregroundStyle(.tertiary)
+            }
+        }
+        .help("How far ahead one deck's beat is. Hold a nudge button on the deck that's ahead to slow it.")
+    }
 }
 
 // MARK: - Deck
@@ -66,6 +176,7 @@ private struct DeckView: View {
                         .controlSize(.mini)
                         .frame(minWidth: 60, maxWidth: 120)
                         .onTapGesture(count: 2) { deck.tempo = 0 }
+                        .onScrollWheel { deck.tempo = min(max(deck.tempo + $0 * 0.0002, -Deck.tempoRange), Deck.tempoRange) }
                         .help("Tempo ±8% — double-click to reset")
                     NudgeButton(deck: deck, direction: 1)
                 }
@@ -130,6 +241,7 @@ private struct DeckView: View {
                     .foregroundStyle(deck.tempo == 0 ? AnyShapeStyle(.secondary) : AnyShapeStyle(accent))
             }
             .help(deck.track != nil && deck.effectiveBPM == nil ? "No BPM yet — Track ▸ Detect BPM" : "")
+            KeyReadout(deck: deck, other: other)
             Menu { deckMenu } label: { Image(systemName: "ellipsis.circle") }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
@@ -180,6 +292,49 @@ private struct DeckView: View {
             return true
         }
         return false
+    }
+}
+
+/// The deck's key in Camelot and standard notation, as it sounds at the current tempo, with a
+/// check or a warning for how it sits with the other deck's.
+private struct KeyReadout: View {
+    let deck: Deck
+    let other: Deck
+
+    var body: some View {
+        let key = deck.effectiveKey
+        let otherKey = other.effectiveKey
+        VStack(alignment: .trailing, spacing: 1) {
+            Text(key?.camelot ?? "—")
+                .font(.title3.monospacedDigit())
+                .foregroundStyle(key == nil ? .tertiary : .primary)
+            HStack(spacing: 2) {
+                if let key, let otherKey {
+                    Image(systemName: key.isCompatible(with: otherKey) ? "checkmark" : "exclamationmark.triangle.fill")
+                        .font(.system(size: 7, weight: .bold))
+                        .foregroundStyle(key.isCompatible(with: otherKey) ? AnyShapeStyle(.secondary) : AnyShapeStyle(Palette.ochre))
+                }
+                Text(key?.name ?? "Key").font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+        .frame(minWidth: 30, alignment: .trailing)
+        .help(help)
+    }
+
+    private var help: String {
+        guard let key = deck.effectiveKey else {
+            return deck.track == nil ? "" : "No key yet — Track ▸ Detect Key"
+        }
+        var lines: [String] = []
+        if deck.pitchShift != 0, let original = deck.key {
+            lines.append("\(original.label), shifted \(deck.pitchShift > 0 ? "up" : "down") a semitone by the tempo")
+        }
+        if let otherKey = other.effectiveKey {
+            lines.append(key.isCompatible(with: otherKey)
+                ? "Mixes with deck \(other.side.name) (\(otherKey.camelot))"
+                : "Clashes with deck \(other.side.name) (\(otherKey.camelot))")
+        }
+        return lines.isEmpty ? key.label : lines.joined(separator: "\n")
     }
 }
 
@@ -333,6 +488,7 @@ private struct MixerSection: View {
             HStack(spacing: 8) {
                 Text("A").font(.caption.weight(.bold)).foregroundStyle(Palette.warm)
                 Crossfader(position: mixer.crossfader) { mixer.moveCrossfader(to: $0) }
+                    .onScrollWheel { mixer.moveCrossfader(to: mixer.crossfader + $0 / 300) }
                 Text("B").font(.caption.weight(.bold)).foregroundStyle(Palette.cool)
                 Menu {
                     Picker("Crossfade Length", selection: $mixer.autoFadeSeconds) {
@@ -390,6 +546,7 @@ private struct ChannelStrip: View {
             .frame(width: 20, height: 104)
             .padding(.top, 4)
             .onTapGesture(count: 2) { deck.level = 1 }
+            .onScrollWheel { deck.level = min(max(deck.level + Float($0 / 150), 0), 1) }
             .help("Deck \(deck.side.name) level — double-click to reset")
     }
 }
@@ -439,6 +596,7 @@ private struct Knob: View {
         .frame(width: size, height: size)
         .padding(2)
         .contentShape(Circle())
+        .onScrollWheel { value = min(max(value + Float($0 / 150) * span, range.lowerBound), range.upperBound) }
         .gesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { drag in

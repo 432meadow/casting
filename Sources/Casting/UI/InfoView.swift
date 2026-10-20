@@ -11,7 +11,7 @@ struct InfoView: View {
         case title = "Title", artist = "Artist", album = "Album", albumArtist = "Album Artist"
         case genre = "Genre", composer = "Composer", grouping = "Grouping"
         case year = "Year", trackNumber = "Track", trackCount = "of Tracks"
-        case discNumber = "Disc", discCount = "of Discs", bpm = "BPM", comment = "Comment"
+        case discNumber = "Disc", discCount = "of Discs", bpm = "BPM", key = "Key", comment = "Comment"
 
         var isNumeric: Bool {
             switch self {
@@ -37,6 +37,7 @@ struct InfoView: View {
             case .discNumber: number(track.discNumber)
             case .discCount: number(track.totalNumberOfDiscs)
             case .bpm: number(track.bpm)
+            case .key: track.musicalKey
             }
         }
     }
@@ -60,6 +61,8 @@ struct InfoView: View {
                 HStack {
                     textField(.year).frame(width: 140)
                     textField(.bpm).frame(width: 120)
+                    textField(.key).frame(width: 110)
+                        .help("Standard (Am, F#) or Camelot (8A) notation")
                 }
                 HStack {
                     textField(.trackNumber).frame(width: 140)
@@ -188,6 +191,7 @@ struct InfoView: View {
                 case .composer: edit.composer = text
                 case .grouping: edit.grouping = text
                 case .comment: edit.comment = text
+                case .key: edit.musicalKey = MusicalKey(parsing: text)?.name ?? text
                 default: break
                 }
             }

@@ -28,6 +28,18 @@ import Testing
         #expect(!SearchQuery("\"twin aphex\"").matches(aphex))
     }
 
+    @Test func keyScopesMatchTheKeyOrItsNeighbours() {
+        aphex.musicalKey = "Am"
+        #expect(SearchQuery("key:8A").matches(aphex))
+        #expect(SearchQuery("key:am").matches(aphex))
+        #expect(!SearchQuery("key:9A").matches(aphex))
+        #expect(SearchQuery("key:~9A").matches(aphex))
+        #expect(SearchQuery("key:~C").matches(aphex))
+        #expect(!SearchQuery("key:~10A").matches(aphex))
+        aphex.musicalKey = ""
+        #expect(!SearchQuery("key:~8A").matches(aphex))
+    }
+
     @Test func textScopesLookAtOneField() {
         #expect(SearchQuery("artist:\"aphex twin\"").matches(aphex))
         #expect(!SearchQuery("title:aphex").matches(aphex))
@@ -131,6 +143,7 @@ import Testing
     @Test func upgradingSeedsHistoryFromLastPlayed() throws {
         try store.db.execute("""
             DROP TABLE play_history; DROP TABLE tag_write_queue; DROP TABLE listen; DROP TABLE artist_link;
+            ALTER TABLE track DROP COLUMN musical_key;
             UPDATE track SET last_played = 500 WHERE title = 'Track 2';
             PRAGMA user_version = 1;
             """)

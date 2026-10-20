@@ -70,7 +70,12 @@ extension AppModel {
         try store?.update(edit, forTracks: tracks.map(\.id))
         for track in tracks { edit.apply(to: track) }
         if writesTagsToFiles {
-            for track in tracks { tagWriter.enqueue(TagValues(edit: edit, track: track), path: track.path) }
+            for track in tracks {
+                var values = TagValues(edit: edit, track: track)
+                // MP4 has no standard key item; don't rewrite a file over the share for nothing.
+                if Self.mp4Extensions.contains((track.path as NSString).pathExtension.lowercased()) { values.key = nil }
+                tagWriter.enqueue(values, path: track.path)
+            }
         }
     }
 
@@ -81,6 +86,44 @@ extension AppModel {
     func detectBPM(for tracks: [Track]) {
         let missing = tracks.filter { $0.bpm == 0 }
         bpmAnalyzer.enqueue((missing.isEmpty ? tracks : missing).map { ($0.id, $0.path) })
+    }
+
+    /// Saves the BPM and key a deck found for a track that had neither, like detected ones.
+    func fillIn(_ track: Track, from analysis: TrackAnalysis) {
+        guard tracksByID[track.id] === track else { return }
+        var edit = TrackEdit()
+        if track.bpm == 0, let bpm = analysis.grid?.bpm { edit.bpm = Int(bpm.rounded()) }
+        if track.musicalKey.isEmpty, let key = analysis.key { edit.musicalKey = key.name }
+        guard !edit.isEmpty else { return }
+        do {
+            try save(edit, for: [track])
+            noteTracksChanged()
+            refreshVisible()
+        } catch {
+            fatalError = "Couldn't save changes: \(error.localizedDescription)"
+        }
+    }
+
+    private static let mp4Extensions: Set<String> = ["m4a", "m4b", "mp4", "aac", "alac"]
+
+    /// Detects the key of the tracks that have none yet, or of all of them when every one already
+    /// has one (so the same command re-detects a selection).
+    func detectKey(for tracks: [Track]) {
+        let missing = tracks.filter { $0.musicalKey.isEmpty }
+        keyAnalyzer.enqueue((missing.isEmpty ? tracks : missing).map { ($0.id, $0.path) })
+    }
+
+    func saveDetectedKeys(_ results: [(Int64, MusicalKey)]) {
+        do {
+            for (id, key) in results {
+                guard let track = tracksByID[id], track.musicalKey != key.name else { continue }
+                try save(TrackEdit(musicalKey: key.name), for: [track])
+            }
+            noteTracksChanged()
+            refreshVisible()
+        } catch {
+            fatalError = "Couldn't save changes: \(error.localizedDescription)"
+        }
     }
 
     /// Saves a batch of detected tempos like Get Info edits (so they're written into the files

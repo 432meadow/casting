@@ -132,4 +132,30 @@ import Testing
         mixer.pauseAll()
         mixer.autoFadeSeconds = 8
     }
+
+    @Test func deckListensAreRecordedWithoutSkips() async {
+        let mixer = makeMixer()
+        var listens: [(Int64, ListenRecord)] = []
+        mixer.onListenEnded = { listens.append(($0.id, $1)) }
+        var ready = false
+        mixer.load(tracks[0], on: .a) { _ in ready = true }
+        #expect(await waitUntil { ready })
+
+        // A short audition, then something else on the deck: too short to keep.
+        mixer.a.play()
+        try? await Task.sleep(for: .milliseconds(300))
+        ready = false
+        mixer.load(tracks[1], on: .a) { _ in ready = true }
+        #expect(await waitUntil { ready })
+        #expect(listens.isEmpty)
+
+        // Played to the end: a finished listen of about a second, ended by the next load.
+        mixer.a.play()
+        #expect(await waitUntil { !mixer.a.isPlaying })
+        mixer.a.eject()
+        #expect(listens.count == 1)
+        #expect(listens.first?.0 == 2)
+        #expect(listens.first?.1.outcome == .finished)
+        #expect(abs((listens.first?.1.seconds ?? 0) - 1) < 0.25)
+    }
 }

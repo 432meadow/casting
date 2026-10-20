@@ -547,6 +547,11 @@ private struct TrackColumn {
             sortKey: \Track.bpm, comparator: { KeyPathComparator(\Track.bpm, order: $0) }
         ),
         TrackColumn(
+            id: .init("key"), title: "Key", width: 58, minWidth: 34,
+            content: .text({ $0.key?.label ?? $0.musicalKey }),
+            sortKey: \Track.keySortKey, comparator: { KeyPathComparator(\Track.keySortKey, order: $0) }
+        ),
+        TrackColumn(
             id: .init("year"), title: "Year", width: 44, minWidth: 36,
             content: .text({ $0.year > 0 ? String($0.year) : "" }, monospacedDigits: true),
             sortKey: \Track.year, comparator: { KeyPathComparator(\Track.year, order: $0) }

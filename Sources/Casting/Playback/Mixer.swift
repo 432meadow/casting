@@ -47,7 +47,11 @@ final class Mixer {
     @ObservationIgnored var locate: @Sendable (TrackRef) -> URL? = { URL(fileURLWithPath: $0.path) }
     /// Called once per deck load, after half the track (or 4 minutes) has played.
     @ObservationIgnored var onTrackPlayed: ((Track) -> Void)?
+    /// Called when a deck moves on from a track it played for at least a second.
+    @ObservationIgnored var onListenEnded: ((Track, ListenRecord) -> Void)?
     @ObservationIgnored var onUnplayable: ((Track) -> Void)?
+    /// Called once a deck has read its track through, so a missing BPM or key can be filled in.
+    @ObservationIgnored var onAnalyzed: ((Track, TrackAnalysis) -> Void)?
     /// Called whenever a deck starts playing, so the queue player can pause.
     @ObservationIgnored var onStartedPlaying: (() -> Void)?
 
@@ -75,6 +79,7 @@ final class Mixer {
             deck.startEngine = { [weak self] in self?.startEngine() ?? false }
             deck.didStop = { [weak self] in self?.deckStopped() }
             deck.levelChanged = { [weak self] in self?.applyGains() }
+            deck.listenEnded = { [weak self] track, listen in self?.onListenEnded?(track, listen) }
         }
     }
 
@@ -102,13 +107,30 @@ final class Mixer {
             deck.finishLoading(file, at: seconds)
             whenReady?(deck)
             let url = file.url
-            let peaks = await Task.detached(priority: .utility) { Waveform.levels(of: url) }.value
-            if deck.loadToken == token { deck.waveform = peaks }
+            let hint = track.bpm > 0 ? Double(track.bpm) : nil
+            let analysis = await Task.detached(priority: .utility) { TrackAnalysis.analyze(url, bpmHint: hint) }.value
+            if deck.loadToken == token { deck.analysis = analysis }
+            if let analysis { onAnalyzed?(track, analysis) }
         }
     }
 
     func pauseAll() {
         for deck in decks { deck.pause() }
+    }
+
+    /// Ends both decks' listens as stopped, for when casting quits.
+    func endListens() {
+        for deck in decks { deck.endListen(.stopped) }
+    }
+
+    /// How far deck A's beat is ahead of deck B's, in seconds at A's playing speed (negative:
+    /// behind), while both are playing with a beat grid. Within half a beat either way.
+    var beatOffset: TimeInterval? {
+        guard a.isPlaying, b.isPlaying, let gridA = a.beatGrid, let gridB = b.beatGrid,
+              let bpm = a.effectiveBPM else { return nil }
+        var beats = gridA.phase(at: a.currentTime) - gridB.phase(at: b.currentTime)
+        beats -= beats.rounded()
+        return beats * 60 / bpm
     }
 
     // MARK: Crossfader
@@ -277,8 +299,10 @@ final class Deck {
     private(set) var isLoading = false
     private(set) var isPlaying = false
     private(set) var errorMessage: String?
-    /// Loudness overview of the whole track, 0…1 per bin; empty until it's been read.
-    fileprivate(set) var waveform: [Float] = []
+    /// Loudness overview and beat grid, once the file has been read through (nil until then).
+    fileprivate(set) var analysis: TrackAnalysis?
+    var waveform: [Float] { analysis?.overview ?? [] }
+    var beatGrid: BeatGrid? { analysis?.grid }
     /// Where Cue jumps back to.
     private(set) var cuePoint: TimeInterval = 0
     /// Speed change as a fraction (0.02 is +2%). Pitch follows, like a turntable.
@@ -305,6 +329,7 @@ final class Deck {
     @ObservationIgnored fileprivate var startEngine: () -> Bool = { false }
     @ObservationIgnored fileprivate var didStop: () -> Void = {}
     @ObservationIgnored fileprivate var levelChanged: () -> Void = {}
+    @ObservationIgnored fileprivate var listenEnded: (Track, ListenRecord) -> Void = { _, _ in }
     /// Bumped per load or eject, so a slow load that's been replaced is dropped.
     @ObservationIgnored fileprivate private(set) var loadToken = 0
 
@@ -313,8 +338,13 @@ final class Deck {
     @ObservationIgnored private var generation = 0
     /// File frame the current segment was scheduled from.
     @ObservationIgnored private var startFrame: AVAudioFramePosition = 0
-    @ObservationIgnored private var pausedFrame: AVAudioFramePosition = 0
+    /// Observed, so a seek while paused redraws whatever shows the position.
+    private var pausedFrame: AVAudioFramePosition = 0
     @ObservationIgnored private var countedPlay = false
+    /// The loaded track's listen so far: from its first play until the deck moves on.
+    @ObservationIgnored private var listen: ListenRecord?
+    @ObservationIgnored private var listenAccumulatedAt = Date()
+    @ObservationIgnored private var reachedEndOnce = false
 
     init(side: Mixer.Side) {
         self.side = side
@@ -350,11 +380,29 @@ final class Deck {
         return Double(currentFrame) / file.processingFormat.sampleRate
     }
 
+    /// The track's own BPM: the beat grid's (to a hundredth) once it's been fitted, else the tag's.
+    var bpm: Double? {
+        if let grid = beatGrid { return grid.bpm }
+        guard let bpm = track?.bpm, bpm > 0 else { return nil }
+        return Double(bpm)
+    }
+
     /// The track's BPM at the current tempo, if it has one.
     var effectiveBPM: Double? {
-        guard let bpm = track?.bpm, bpm > 0 else { return nil }
-        return Double(bpm) * (1 + tempo)
+        bpm.map { $0 * (1 + tempo) }
     }
+
+    /// The track's key: as tagged, else as worked out when the deck read it.
+    var key: MusicalKey? { track?.key ?? analysis?.key }
+
+    /// Semitones the tempo shifts the pitch by (the varispeed moves both), to the nearest one.
+    var pitchShift: Int { Int((12 * log2(1 + tempo)).rounded()) }
+
+    /// The key it sounds in at the current tempo.
+    var effectiveKey: MusicalKey? { key?.transposed(by: pitchShift) }
+
+    /// How fast the track is playing, with any nudge.
+    var playbackRate: Double { (1 + tempo) * (1 + nudge) }
 
     private var currentFrame: AVAudioFramePosition {
         guard let file else { return 0 }
@@ -367,7 +415,11 @@ final class Deck {
     // MARK: Transport
 
     func play() {
-        guard let file, !isPlaying, startEngine() else { return }
+        guard let file, let track, !isPlaying, startEngine() else { return }
+        if listen == nil {
+            listen = ListenRecord(trackID: track.id, startedAt: Date(), seconds: 0, position: 0, outcome: .finished)
+        }
+        listenAccumulatedAt = Date()
         // At the end, play again from the cue point.
         let from = pausedFrame >= file.length - 1 ? frame(for: cuePoint) : pausedFrame
         schedule(from: from)
@@ -426,20 +478,21 @@ final class Deck {
     }
 
     func tempoMatching(_ other: Deck) -> Double? {
-        guard let bpm = track?.bpm, bpm > 0, let target = other.effectiveBPM else { return nil }
+        guard let bpm, let target = other.effectiveBPM else { return nil }
         let best = [target, target * 2, target / 2]
-            .map { $0 / Double(bpm) - 1 }
+            .map { $0 / bpm - 1 }
             .min { abs($0) < abs($1) }!
         return abs(best) <= Deck.tempoRange + 0.0001 ? best : nil
     }
 
     func eject() {
-        halt()
+        pause(notify: false)  // keeps the position, for the listen
         didStop()
+        endListen(nil)
         loadToken += 1
         track = nil
         file = nil
-        waveform = []
+        analysis = nil
         isLoading = false
         errorMessage = nil
         cuePoint = 0
@@ -449,12 +502,14 @@ final class Deck {
     // MARK: Loading (driven by Mixer)
 
     fileprivate func beginLoading(_ track: Track) -> Int {
-        halt()
+        pause(notify: false)  // keeps the position, for the listen
         didStop()
+        endListen(nil)
+        reachedEndOnce = false
         loadToken += 1
         self.track = track
         file = nil
-        waveform = []
+        analysis = nil
         errorMessage = nil
         isLoading = true
         countedPlay = false
@@ -488,6 +543,29 @@ final class Deck {
         play()
     }
 
+    // MARK: Listens
+
+    /// Adds the playing time since the last call.
+    private func accumulateListen() {
+        let now = Date()
+        if isPlaying, listen != nil { listen?.seconds += now.timeIntervalSince(listenAccumulatedAt) }
+        listenAccumulatedAt = now
+    }
+
+    /// Ends the current listen. A deck counts it as finished once it played to the end or long
+    /// enough to count as a play; anything shorter was auditioning or mixed out early, and moving a
+    /// deck on says nothing against the track, so it's stopped rather than skipped. `outcome`
+    /// overrides that (quitting is always stopped).
+    fileprivate func endListen(_ outcome: ListenOutcome?) {
+        accumulateListen()
+        guard var ended = listen, let track else { return }
+        listen = nil
+        ended.position = currentTime
+        ended.outcome = outcome ?? (reachedEndOnce || countedPlay ? .finished : .stopped)
+        guard ended.seconds >= 1 else { return }
+        listenEnded(track, ended)
+    }
+
     // MARK: Scheduling
 
     private func frame(for seconds: TimeInterval) -> AVAudioFramePosition {
@@ -497,6 +575,7 @@ final class Deck {
     }
 
     private func halt() {
+        accumulateListen()
         generation += 1
         node.stop()
         isPlaying = false
@@ -517,58 +596,12 @@ final class Deck {
     private func reachedEnd(generation finished: Int) {
         guard finished == generation, isPlaying, let file else { return }
         pausedFrame = file.length
+        reachedEndOnce = true
         halt()
         didStop()
     }
 
     private func applyRate() {
-        varispeed.rate = Float((1 + tempo) * (1 + nudge))
-    }
-}
-
-// MARK: - Waveform
-
-enum Waveform {
-    static let bins = 600
-
-    /// RMS loudness per bin across the whole file, scaled so the loudest bin is 1. RMS rather than
-    /// peaks: loudly mastered tracks peak near full scale throughout, which hides breakdowns.
-    static func levels(of url: URL, bins: Int = Waveform.bins) -> [Float] {
-        guard let file = try? AVAudioFile(forReading: url), file.length > 0,
-              let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 65_536) else { return [] }
-        let channels = Int(file.processingFormat.channelCount)
-        let length = file.length
-        var sums = [Double](repeating: 0, count: bins)
-        var counts = [Int](repeating: 0, count: bins)
-        var position: AVAudioFramePosition = 0
-        while position < length {
-            guard (try? file.read(into: buffer)) != nil, buffer.frameLength > 0,
-                  let data = buffer.floatChannelData else { break }
-            let frames = Int(buffer.frameLength)
-            var offset = 0
-            while offset < frames {
-                let bin = Int((position + AVAudioFramePosition(offset)) * AVAudioFramePosition(bins) / length)
-                // The last frame of this bin, or the end of the buffer.
-                let binEnd = Int(((AVAudioFramePosition(bin) + 1) * length + AVAudioFramePosition(bins) - 1) / AVAudioFramePosition(bins) - position)
-                let end = min(frames, max(offset + 1, binEnd))
-                var sum: Double = 0
-                for channel in 0..<channels {
-                    let samples = data[channel]
-                    for index in offset..<end {
-                        let sample = Double(samples[index])
-                        sum += sample * sample
-                    }
-                }
-                sums[min(bin, bins - 1)] += sum / Double(channels)
-                counts[min(bin, bins - 1)] += end - offset
-                offset = end
-            }
-            position += AVAudioFramePosition(frames)
-        }
-        var levels = zip(sums, counts).map { sum, count in count > 0 ? Float((sum / Double(count)).squareRoot()) : 0 }
-        if let loudest = levels.max(), loudest > 0 {
-            levels = levels.map { $0 / loudest }
-        }
-        return levels
+        varispeed.rate = Float(playbackRate)
     }
 }

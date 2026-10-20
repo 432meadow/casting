@@ -185,9 +185,10 @@ final class AppModel {
     }
     let tagWriter = TagWriteQueue()
 
-    // MARK: BPM detection
+    // MARK: BPM and key detection
 
-    let bpmAnalyzer = BPMAnalysisQueue()
+    let bpmAnalyzer = TrackAnalysisQueue.bpm()
+    let keyAnalyzer = TrackAnalysisQueue.key()
 
     // MARK: Panels and sheets
 
@@ -200,6 +201,10 @@ final class AppModel {
     /// Whether the two-deck mixer sits above the now-playing bar.
     var isShowingMixer = UserDefaults.standard.bool(forKey: "mixer.isShowing") {
         didSet { UserDefaults.standard.set(isShowingMixer, forKey: "mixer.isShowing") }
+    }
+    /// Whether the mixer shows both decks' beats close up above the decks.
+    var isShowingBeatView = UserDefaults.standard.object(forKey: "mixer.isShowingBeats") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(isShowingBeatView, forKey: "mixer.isShowingBeats") }
     }
 
     func showInfo(for tracks: [Track]) {
@@ -270,6 +275,7 @@ final class AppModel {
         restorePendingTagWrites()
         player.onUnplayable = { [weak self] track in self?.noteUnplayable(track) }
         bpmAnalyzer.didDetect = { [weak self] results in self?.saveDetectedBPMs(results) }
+        keyAnalyzer.didDetect = { [weak self] results in self?.saveDetectedKeys(results) }
         restorePlaybackState()
         startWatchingFolders()
         if soulseek.connectsAtLaunch, soulseek.hasCredentials { soulseek.connect() }
@@ -277,6 +283,7 @@ final class AppModel {
             MainActor.assumeIsolated {
                 self?.savePlaybackState()
                 self?.player.endCurrentListen()
+                self?.mixer.endListens()
             }
         }
 

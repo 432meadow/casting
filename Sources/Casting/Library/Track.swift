@@ -28,6 +28,8 @@ final class Track: NSObject, Identifiable {
     @objc var bitDepth = 0
     @objc var channels = 0
     @objc var bpm = 0
+    /// The key as tagged or detected, in standard notation ("Am", "F#") when it could be read.
+    @objc var musicalKey = ""
     @objc var fileSize: Int64 = 0
     @objc var compilation = false
     @objc var enabled = true
@@ -66,6 +68,10 @@ final class Track: NSObject, Identifiable {
 
     // Comparable stand-ins for optional values, used by table sorting.
     var dateAddedSortKey: Double { dateAdded?.timeIntervalSinceReferenceDate ?? 0 }
+    /// Round the Camelot wheel (1A, 1B, 2A, …); unknown keys last.
+    var keySortKey: Int { key?.sortIndex ?? 100 }
+
+    var key: MusicalKey? { MusicalKey(parsing: musicalKey) }
     var lastPlayedSortKey: Double { lastPlayed?.timeIntervalSinceReferenceDate ?? 0 }
 
     /// Older predicates and AppleScript use a few alternate spellings

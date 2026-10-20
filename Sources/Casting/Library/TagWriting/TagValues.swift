@@ -20,6 +20,8 @@ struct TagValues: Equatable, Sendable, Codable {
     var track: NumberPair?
     var disc: NumberPair?
     var bpm: Int?
+    /// Standard notation ("Am"). Not written to MP4 files, which have no standard key item.
+    var key: String?
     var compilation: Bool?
     /// 0–5 in half-star steps.
     var rating: Double?
@@ -32,7 +34,7 @@ struct TagValues: Equatable, Sendable, Codable {
             (\.title, title != nil), (\.artist, artist != nil), (\.album, album != nil),
             (\.albumArtist, albumArtist != nil), (\.genre, genre != nil), (\.composer, composer != nil),
             (\.grouping, grouping != nil), (\.comment, comment != nil), (\.year, year != nil),
-            (\.track, track != nil), (\.disc, disc != nil), (\.bpm, bpm != nil),
+            (\.track, track != nil), (\.disc, disc != nil), (\.bpm, bpm != nil), (\.key, key != nil),
             (\.compilation, compilation != nil), (\.rating, rating != nil),
         ]
         return all.filter(\.1).map(\.0)
@@ -57,6 +59,7 @@ struct TagValues: Equatable, Sendable, Codable {
             disc = NumberPair(number: track.discNumber, total: track.totalNumberOfDiscs)
         }
         if edit.bpm != nil { bpm = track.bpm }
+        if edit.musicalKey != nil { key = track.musicalKey }
         if edit.compilation != nil { compilation = track.compilation }
         if edit.rating != nil { rating = track.rating }
     }
@@ -64,7 +67,7 @@ struct TagValues: Equatable, Sendable, Codable {
     init(title: String? = nil, artist: String? = nil, album: String? = nil, albumArtist: String? = nil,
          genre: String? = nil, composer: String? = nil, grouping: String? = nil, comment: String? = nil,
          year: Int? = nil, track: NumberPair? = nil, disc: NumberPair? = nil, bpm: Int? = nil,
-         compilation: Bool? = nil, rating: Double? = nil) {
+         key: String? = nil, compilation: Bool? = nil, rating: Double? = nil) {
         self.title = title
         self.artist = artist
         self.album = album
@@ -77,6 +80,7 @@ struct TagValues: Equatable, Sendable, Codable {
         self.track = track
         self.disc = disc
         self.bpm = bpm
+        self.key = key
         self.compilation = compilation
         self.rating = rating
     }
@@ -96,6 +100,7 @@ struct TagValues: Equatable, Sendable, Codable {
         if let v = newer.track { result.track = v }
         if let v = newer.disc { result.disc = v }
         if let v = newer.bpm { result.bpm = v }
+        if let v = newer.key { result.key = v }
         if let v = newer.compilation { result.compilation = v }
         if let v = newer.rating { result.rating = v }
         return result
@@ -112,7 +117,7 @@ struct TagValues: Equatable, Sendable, Codable {
         return same(title, stored.title) && same(artist, stored.artist) && same(album, stored.album)
             && same(albumArtist, stored.albumArtist) && same(genre, stored.genre) && same(composer, stored.composer)
             && same(grouping, stored.grouping) && same(comment, stored.comment) && same(year, stored.year)
-            && same(track, stored.track) && same(disc, stored.disc) && same(bpm, stored.bpm)
+            && same(track, stored.track) && same(disc, stored.disc) && same(bpm, stored.bpm) && same(key, stored.key)
             && (compilation == nil || compilation == (stored.compilation ?? false))
             && (rating == nil || rating == (stored.rating ?? 0))
     }

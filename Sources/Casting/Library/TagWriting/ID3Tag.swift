@@ -19,7 +19,7 @@ enum ID3Tag: TagFormat {
     /// v2.2's 3-letter names for the frames casting writes or reads.
     private static let v22Names: [String: String] = [
         "TIT2": "TT2", "TPE1": "TP1", "TALB": "TAL", "TPE2": "TP2", "TCON": "TCO", "TCOM": "TCM",
-        "TIT1": "TT1", "TYER": "TYE", "TRCK": "TRK", "TPOS": "TPA", "TBPM": "TBP", "TCMP": "TCP",
+        "TIT1": "TT1", "TYER": "TYE", "TRCK": "TRK", "TPOS": "TPA", "TBPM": "TBP", "TKEY": "TKE", "TCMP": "TCP",
         "COMM": "COM", "POPM": "POP",
     ]
 
@@ -52,6 +52,7 @@ enum ID3Tag: TagFormat {
         case \TagValues.track: ["TRCK"]
         case \TagValues.disc: ["TPOS"]
         case \TagValues.bpm: ["TBPM"]
+        case \TagValues.key: ["TKEY"]
         case \TagValues.compilation: ["TCMP"]
         default: []
         }
@@ -178,6 +179,7 @@ enum ID3Tag: TagFormat {
         pair(\.track)
         pair(\.disc)
         number(\.bpm)
+        text(\.key)
         if let compilation = values.compilation {
             replace(ids(for: \TagValues.compilation, version: version), with: compilation ? textBody("1", version: version) : nil)
         }
@@ -301,6 +303,7 @@ enum ID3Tag: TagFormat {
         values.track = pair("TRCK")
         values.disc = pair("TPOS")
         values.bpm = number("TBPM")
+        values.key = text("TKEY")
         values.compilation = text("TCMP").map { $0 == "1" }
         values.comment = parsed.frames.lazy.filter(isPlainComment).compactMap { splitComment($0)?.text }.first
         if let popm = parsed.frames.first(where: { $0.id == name("POPM", parsed.version) }) {

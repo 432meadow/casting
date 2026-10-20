@@ -2,7 +2,7 @@ import Foundation
 
 /// The app's own library database.
 final class LibraryStore {
-    static let schemaVersion = 3
+    static let schemaVersion = 4
 
     static var defaultURL: URL {
         supportDirectory.appendingPathComponent("casting/Library.sqlite")
@@ -40,6 +40,7 @@ final class LibraryStore {
             if current < 1 { try createVersion1(db) }
             if current < 2 { try upgradeToVersion2(db) }
             if current < 3 { try upgradeToVersion3(db) }
+            if current < 4 { try upgradeToVersion4(db) }
             try db.execute("PRAGMA user_version = \(schemaVersion)")
         }
     }
@@ -147,12 +148,17 @@ final class LibraryStore {
             """)
     }
 
+    /// Version 4: each track's musical key.
+    private static func upgradeToVersion4(_ db: Database) throws {
+        try db.execute("ALTER TABLE track ADD COLUMN musical_key TEXT NOT NULL DEFAULT ''")
+    }
+
     func loadTracks() throws -> [Track] {
         let statement = try db.prepare("""
             SELECT id, title, artist, album, album_artist, genre, composer, grouping, comment,
                    year, track_number, track_count, disc_number, disc_count, duration,
                    bit_rate, sample_rate, bit_depth, channels, bpm, file_size, compilation, enabled,
-                   rating, play_count, date_added, last_played, date_modified, date_created, path
+                   rating, play_count, date_added, last_played, date_modified, date_created, path, musical_key
             FROM track
             """)
         func date(_ column: Int32) -> Date? {
@@ -191,6 +197,7 @@ final class LibraryStore {
             track.dateModified = date(27)
             track.dateCreated = date(28)
             track.path = statement.string(29) ?? ""
+            track.musicalKey = statement.string(30) ?? ""
             tracks.append(track)
         }
         return tracks

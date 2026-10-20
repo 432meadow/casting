@@ -38,6 +38,7 @@ enum FLACTag: TagFormat {
         \TagValues.comment: ["COMMENT", "DESCRIPTION"],
         \TagValues.year: ["DATE", "YEAR"],
         \TagValues.bpm: ["BPM"],
+        \TagValues.key: ["INITIALKEY", "KEY"],
         \TagValues.compilation: ["COMPILATION"],
         // RATING is 0–100 (20 per star), as already found in this library's FLAC files.
         \TagValues.rating: ["RATING"],
@@ -156,6 +157,7 @@ enum FLACTag: TagFormat {
             add("DISCTOTAL", number(v.total))
         }
         if let v = values.bpm { add("BPM", number(v)) }
+        if let v = values.key { add("INITIALKEY", v) }
         if let v = values.compilation { add("COMPILATION", v ? "1" : "") }
         if let v = values.rating { add("RATING", number(Int((v.clamped(to: 0...5) * 20).rounded()))) }
 
@@ -209,6 +211,7 @@ enum FLACTag: TagFormat {
         values.track = pair("TRACKNUMBER", "TRACKTOTAL")
         values.disc = pair("DISCNUMBER", "DISCTOTAL")
         values.bpm = int("BPM")
+        values.key = value("INITIALKEY")
         values.compilation = value("COMPILATION").map { $0 == "1" }
         values.rating = int("RATING").map { (Double($0) / 10).rounded() / 2 }
         return values

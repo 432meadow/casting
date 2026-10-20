@@ -16,6 +16,7 @@ struct TrackEdit: Hashable {
     var discNumber: Int?
     var discCount: Int?
     var bpm: Int?
+    var musicalKey: String?
     var compilation: Bool?
     var rating: Double?
 
@@ -39,6 +40,7 @@ struct TrackEdit: Hashable {
         add("disc_number", discNumber)
         add("disc_count", discCount)
         add("bpm", bpm)
+        add("musical_key", musicalKey)
         add("compilation", compilation)
         add("rating", rating)
         return result
@@ -61,6 +63,7 @@ struct TrackEdit: Hashable {
         if discNumber != nil { old.discNumber = track.discNumber }
         if discCount != nil { old.discCount = track.totalNumberOfDiscs }
         if bpm != nil { old.bpm = track.bpm }
+        if musicalKey != nil { old.musicalKey = track.musicalKey }
         if compilation != nil { old.compilation = track.compilation }
         if rating != nil { old.rating = track.rating }
         return old
@@ -82,6 +85,7 @@ struct TrackEdit: Hashable {
         if let discNumber { track.discNumber = discNumber }
         if let discCount { track.totalNumberOfDiscs = discCount }
         if let bpm { track.bpm = bpm }
+        if let musicalKey { track.musicalKey = musicalKey }
         if let compilation { track.compilation = compilation }
         if let rating { track.rating = rating }
         track.resetSearchText()
@@ -229,8 +233,9 @@ extension LibraryStore {
             let insert = try db.prepare("""
                 INSERT INTO track (title, artist, album, album_artist, genre, composer, comment, year,
                     track_number, track_count, disc_number, disc_count, bpm, compilation, duration, bit_rate,
-                    sample_rate, channels, file_size, date_added, date_created, date_modified, path, bookmark)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    sample_rate, channels, file_size, date_added, date_created, date_modified, path, bookmark,
+                    musical_key)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """)
             for track in scanned {
                 try exists.bind([track.path])
@@ -241,7 +246,7 @@ extension LibraryStore {
                     track.discCount, track.bpm, track.compilation, track.duration, track.bitRate,
                     track.sampleRate, track.channels, track.fileSize, date.timeIntervalSince1970,
                     track.dateCreated?.timeIntervalSince1970, track.dateModified?.timeIntervalSince1970,
-                    track.path, track.bookmark,
+                    track.path, track.bookmark, track.musicalKey,
                 ])
                 added += 1
             }

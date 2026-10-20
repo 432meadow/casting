@@ -44,7 +44,7 @@ struct ContentView: View {
                     }
                 }
             }
-            .searchable(text: $model.searchText, placement: .toolbar, prompt: "Search  (artist:, bpm:120-128, rating:>=4…)")
+            .searchable(text: $model.searchText, placement: .toolbar, prompt: "Search  (artist:, bpm:120-128, key:~8A, rating:>=4…)")
 
             if model.isShowingMixer {
                 MixerView()
@@ -136,6 +136,9 @@ struct ContentView: View {
         }
         if model.bpmAnalyzer.isRunning {
             writing += " · Detecting BPM \(model.bpmAnalyzer.done.formatted())/\(model.bpmAnalyzer.total.formatted())"
+        }
+        if model.keyAnalyzer.isRunning {
+            writing += " · Detecting keys \(model.keyAnalyzer.done.formatted())/\(model.keyAnalyzer.total.formatted())"
         }
         if model.selection == .albums {
             return "\(model.albums.count.formatted()) albums · \(tracks.count.formatted()) tracks · \(span)\(writing)"

@@ -124,12 +124,12 @@ import Testing
     }
 
     @MainActor @Test func queueSkipsDuplicatesRoundsAndCancels() async {
-        let queue = BPMAnalysisQueue(width: 2) { url in
+        let queue = TrackAnalysisQueue<Int>(width: 2) { url in
             Thread.sleep(forTimeInterval: 0.01)
             switch url.lastPathComponent {
             case "missing.mp3": throw CocoaError(.fileNoSuchFile)
             case "ambient.mp3": return nil
-            default: return 127.6
+            default: return 128
             }
         }
         var saved: [(Int64, Int)] = []

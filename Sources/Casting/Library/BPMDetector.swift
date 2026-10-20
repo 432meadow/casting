@@ -284,8 +284,8 @@ enum BPMDetector {
 
     // MARK: Onset envelope
 
-    private static let frameSize = 512
-    private static let hop = 64
+    static let frameSize = 512
+    static let hop = 64
 
     /// Half-wave-rectified spectral flux of log magnitudes, with its slow drift removed.
     static func onsetEnvelope(_ samples: [Float], framesPerSecond: Double) -> [Float] {

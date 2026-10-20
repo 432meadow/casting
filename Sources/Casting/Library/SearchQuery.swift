@@ -2,7 +2,8 @@ import Foundation
 
 /// The search field's query: plain words (every one must match), `-word` to exclude, "quoted
 /// phrases", and field scopes such as `artist:"aphex twin"`, `bpm:120-128`, `rating:>=4`,
-/// `year:<1990`, `added:30d` (in the last 30 days) or `played:>1y` (not in the last year).
+/// `year:<1990`, `added:30d` (in the last 30 days), `played:>1y` (not in the last year), or
+/// `key:8A` / `key:Am` (that key) and `key:~8A` (any key that mixes with it).
 struct SearchQuery {
     enum TextField: String, CaseIterable {
         case title, artist, album, albumartist, genre, composer, comment, grouping, kind, file
@@ -38,6 +39,8 @@ struct SearchQuery {
         case number(NumberField, Comparison)
         /// Within the last `seconds` (or, `olderThan`, longer ago than that / never).
         case date(DateField, seconds: TimeInterval, olderThan: Bool)
+        /// That key, or (`compatible`) any key that mixes with it.
+        case key(MusicalKey, compatible: Bool)
     }
 
     struct Term: Equatable {
@@ -105,6 +108,10 @@ struct SearchQuery {
     private static func fieldCondition(name: String, value: String) -> Condition? {
         let name = aliases[name] ?? name
         guard !value.isEmpty else { return nil }
+        if name == "key" {
+            let compatible = value.hasPrefix("~")
+            return MusicalKey(parsing: compatible ? String(value.dropFirst()) : value).map { .key($0, compatible: compatible) }
+        }
         if let field = TextField(rawValue: name) {
             return .text(field, value)
         }
@@ -198,6 +205,9 @@ struct SearchQuery {
             case .time: track.length
             }
             return comparison.matches(value)
+        case .key(let key, let compatible):
+            guard let trackKey = track.key else { return false }
+            return compatible ? trackKey.isCompatible(with: key) : trackKey == key
         case .date(let field, let seconds, let olderThan):
             let date = field == .added ? track.dateAdded : track.lastPlayed
             guard let date else { return olderThan }

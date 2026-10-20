@@ -278,6 +278,7 @@ enum MP4Tag: TagFormat {
     static func verify(original: [UInt8], rewritten: [UInt8], values: TagValues) throws {
         var values = values
         values.rating = nil
+        values.key = nil
         let before = try layout(original)
         let after: Layout
         do { after = try layout(rewritten) } catch { throw TagWriteError.verificationFailed("atoms don't parse") }

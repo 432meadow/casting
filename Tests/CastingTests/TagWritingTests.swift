@@ -321,6 +321,28 @@ import Testing
         #expect(try await TagFileWriter.write(TagValues(rating: 5), to: url) == .unchanged)
     }
 
+    // MARK: Keys
+
+    @Test func keysRoundTripInMP3AndFLAC() async throws {
+        let mp3 = try file("keyed.mp3", MP3Fixture.id3(version: 3, frames: [MP3Fixture.text("TIT2", "Song")], padding: 64) + MP3Fixture.audio())
+        _ = try await TagFileWriter.write(TagValues(key: "F#m"), to: mp3)
+        #expect(try ID3Tag.read(try bytes(mp3)).key == "F#m")
+        #expect(try #require(await TagReader.read(mp3)).musicalKey == "F#m")
+
+        let flac = dir.appendingPathComponent("keyed.flac")
+        try FLACFixture.write(to: flac, extraComments: ["KEY=8A"], padding: 256)
+        _ = try await TagFileWriter.write(TagValues(key: "Am"), to: flac)
+        let comments = try FLACTag.parseComments(try #require(try FLACTag.parse(try bytes(flac)).blocks.first { $0.type == 4 }).body).entries
+        #expect(comments.contains("INITIALKEY=Am") && !comments.contains("KEY=8A"), "the old spelling is replaced")
+        try expectNoTempFiles()
+    }
+
+    @Test func m4aKeyOnlyEditIsANoOp() async throws {
+        let url = dir.appendingPathComponent("keyed.m4a")
+        try ToneFile.write(to: url, seconds: 0.2, format: kAudioFormatMPEG4AAC)
+        #expect(try await TagFileWriter.write(TagValues(key: "Am"), to: url) == .unchanged)
+    }
+
     // MARK: Queue and model glue
 
     @Test func editValuesKeepTheOtherHalfOfNumberPairs() {

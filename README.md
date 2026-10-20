@@ -72,7 +72,8 @@ xattr -dr com.apple.quarantine /Applications/casting.app
   `albumartist:`, `genre:`, `composer:`, `comment:`, `grouping:`, `kind:flac`, `file:`;
   numbers `bpm:120-128`, `rating:>=4`, `year:<1990`, `plays:0`, `track:`, `disc:`, `bitrate:`,
   `time:>5:00`; dates `added:30d` (in the last 30 days), `played:>1y` (not in the last year;
-  units d/w/mo/y). Any scope can be negated (`-genre:techno`).
+  units d/w/mo/y); keys `key:8A` or `key:Am`, and `key:~8A` for every key that mixes with 8A.
+  Any scope can be negated (`-genre:techno`).
 - **Stats** (sidebar): listening time, plays, different tracks and skips for the last 7 days,
   30 days, 12 months or all time; top 10 artists, albums and tracks by time listened (click an
   artist to open their page, double-click anything to play it); listening by hour of day and
@@ -139,6 +140,13 @@ xattr -dr com.apple.quarantine /Applications/casting.app
   all existing BPM tags in the test library followed. On 319 randomly picked tagged tracks it
   agreed with the tag (within 2%) on 80%, and on 84% if half/double/3:2 time counts; 6% had no
   clear beat and are left empty.
+- **Detect Key** works the same way and fills a Key column (Camelot and standard notation,
+  sorted round the Camelot wheel; editable in Get Info). It reads a minute from the middle of the
+  file, builds a chromagram (55 Hz–1.8 kHz) and picks the major or minor key whose
+  Krumhansl–Kessler profile fits best (`Library/KeyDetector.swift`). Keys are read from and
+  written to ID3 `TKEY` and FLAC `INITIALKEY`; MP4 files have no standard key item, so keys are
+  read from them but not written. It's checked against generated chord progressions, not yet
+  against a tagged library, so treat it as a first guess.
 
 **Playback**
 - Gapless playback; shuffle (⌥⌘S), repeat off/all/one (⌘R).
@@ -148,9 +156,21 @@ xattr -dr com.apple.quarantine /Applications/casting.app
 - Two-deck **mixer** (⇧⌘M) for blending tracks by hand: load a deck from the track menu (⌥⌘1 / ⌥⌘2)
   or by dragging a track onto it. Equal-power crossfader, auto crossfade over 4–32 s (⇧⌘X),
   3-band EQ with kills, channel faders, tempo ±8% with hold-to-nudge and BPM match, cue point,
-  and a loudness overview to click-seek in. **Continue in Mixer** moves the playing track onto a
-  deck at the same spot. The mixer and the queue player take turns: starting one pauses the other.
-  There's one output, so no headphone pre-listen.
+  and a loudness overview to click-seek in. Knobs, faders, tempo and the crossfader also follow
+  the scroll wheel. **Continue in Mixer** moves the playing track onto a deck at the same spot.
+  The mixer and the queue player take turns: starting one pauses the other. There's one output,
+  so no headphone pre-listen.
+  - **Beats** (⌃⌘B): both decks close up, one above the other, scrolling past a shared playhead
+    with each track's beat grid drawn on, and how far apart the beats are while both play. The
+    grid is fitted to the track's onsets when the deck loads it (tempo to 0.01 BPM, starting from
+    the tag). Paused, drag a strip to put a beat under the playhead before setting the cue.
+  - Each deck shows its key as it sounds at the current tempo (±8% can move it a semitone), with
+    a warning when it clashes with the other deck's. Tracks without a BPM or key get the ones the
+    deck worked out.
+  - The **Mixer** menu plays and cues each deck from the keyboard (⌃⌘1 / ⌃⌘2, add ⌥ to cue) and
+    moves the crossfader (⌃⌘← / ⌃⌘→).
+  - Deck plays count and show up in History and Stats. Auditioning a track or mixing it out
+    early isn't counted as a skip.
 - Output device picker and AirPlay button in the now-playing bar.
 - Media keys, Control Center / Now Playing widget, headphone buttons.
 - Menu bar mini-player; the app keeps running when the window is closed.
@@ -270,16 +290,16 @@ volume (SMB, AFP, NFS) can arrive slowly (the share casting was developed agains
 
 | Path | What |
 | --- | --- |
-| `Sources/Casting/Library/` | SQLite wrapper, store (+ editing, history, listen log, removal, saved tag writes), listening stats, artist index and discography matching, smart playlist predicates, tag reader, albums, artwork, BPM detection, search scopes, duplicate and missing-file checks |
+| `Sources/Casting/Library/` | SQLite wrapper, store (+ editing, history, listen log, removal, saved tag writes), listening stats, artist index and discography matching, smart playlist predicates, tag reader, albums, artwork, BPM and key detection, search scopes, duplicate and missing-file checks |
 | `Sources/Casting/Library/TagWriting/` | ID3 / FLAC / MP4 tag writers, safe file replacement, background write queue |
-| `Sources/Casting/Playback/` | Player (queue, gapless, shuffle/repeat), file cache, EQ, output devices, Now Playing |
+| `Sources/Casting/Playback/` | Player (queue, gapless, shuffle/repeat), two-deck mixer and track analysis (waveforms, beat grid), file cache, EQ, output devices, Now Playing |
 | `Sources/Casting/Metadata/` | MusicBrainz / Wikipedia / ListenBrainz client for artist pages (rate limit, disk cache) |
 | `Sources/Casting/Soulseek/` | Soulseek client: wire codec, messages, client actor (server + peer connections), UI model |
 | `Sources/Casting/AppModel*.swift` | App state, selection, actions and undo, scanning, library housekeeping |
 | `Sources/Casting/Updater.swift` | Sparkle in-app updates (Check for Updates…, automatic checks) |
-| `Sources/Casting/UI/` | Track table (NSTableView), sidebar, albums, browser, Up Next, Get Info, smart editor, EQ, settings, menu bar |
+| `Sources/Casting/UI/` | Track table (NSTableView), sidebar, albums, browser, Up Next, Get Info, smart editor, EQ, mixer, settings, menu bar |
 | `Sources/ObjCSupport/` | Catches NSExceptions (predicate evaluation, audio graph connections) |
-| `Tests/CastingTests/` | 122 tests: listening stats, the listen log (store, v2→v3 upgrade, player skip/pause/stop tracking), discography matching, artist index, smart playlist predicates, albums/artwork, library editing, history/removal/saved tag writes and the v1→v2 upgrade, search scopes, duplicates, missing-file checks, tag reading and writing (on generated files), BPM detection (generated drum patterns, WAV and FLAC excerpts), player, Soulseek codec + loopback client tests (search, wishlist, browse, download, resume, denial, blocking, serving searches + uploads, upload speed limit) against a mock server |
+| `Tests/CastingTests/` | 137 tests: listening stats, the listen log (store, v2→v3 upgrade, player skip/pause/stop tracking), discography matching, artist index, smart playlist predicates, albums/artwork, library editing, history/removal/saved tag writes and the v1→v2 upgrade, search scopes, duplicates, missing-file checks, tag reading and writing (on generated files), BPM detection (generated drum patterns, WAV and FLAC excerpts), beat grids (click tracks) and keys (chord progressions), player, mixer, Soulseek codec + loopback client tests (search, wishlist, browse, download, resume, denial, blocking, serving searches + uploads, upload speed limit) against a mock server |
 
 ## Known issues
 

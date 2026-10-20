@@ -6,7 +6,9 @@ extension AppModel {
         mixer.locate = player.locate
         mixer.setOutputDevice(player.outputDeviceUID)
         mixer.onTrackPlayed = { [weak self] track in self?.recordPlay(track) }
+        mixer.onListenEnded = { [weak self] track, listen in self?.recordListen(listen, of: track) }
         mixer.onUnplayable = { [weak self] track in self?.noteUnplayable(track) }
+        mixer.onAnalyzed = { [weak self] track, analysis in self?.fillIn(track, from: analysis) }
         // One or the other: the mixer and the queue player never play over each other.
         mixer.onStartedPlaying = { [weak self] in self?.player.pause() }
         player.onStartedPlaying = { [weak self] in self?.mixer.pauseAll() }

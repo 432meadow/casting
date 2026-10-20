@@ -26,6 +26,7 @@ enum TrackMenu {
 
         menu.addItem(ratingItem(tracks, model: model))
         menu.addItem(ClosureMenuItem(detectBPMTitle(for: tracks)) { model.detectBPM(for: tracks) })
+        menu.addItem(ClosureMenuItem(detectKeyTitle(for: tracks)) { model.detectKey(for: tracks) })
         menu.addItem(ClosureMenuItem("Get Info") { model.showInfo(for: tracks) })
         if tracks.count == 1, !tracks[0].displayArtist.isEmpty {
             menu.addItem(ClosureMenuItem("Go to Artist") { model.showArtist(tracks[0].displayArtist) })
@@ -46,6 +47,10 @@ enum TrackMenu {
     /// Detect BPM fills in missing tempos; once every selected track has one, it re-detects them.
     static func detectBPMTitle(for tracks: [Track]) -> String {
         !tracks.isEmpty && tracks.allSatisfy { $0.bpm > 0 } ? "Re-detect BPM" : "Detect BPM"
+    }
+
+    static func detectKeyTitle(for tracks: [Track]) -> String {
+        !tracks.isEmpty && tracks.allSatisfy { !$0.musicalKey.isEmpty } ? "Re-detect Key" : "Detect Key"
     }
 
     static func addToPlaylistItem(_ tracks: [Track], model: AppModel) -> NSMenuItem {

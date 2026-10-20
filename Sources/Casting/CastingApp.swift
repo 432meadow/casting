@@ -44,6 +44,7 @@ struct CastingApp: App {
             }
             TrackCommands(model: model)
             ControlsCommands(model: model)
+            MixerCommands(model: model)
         }
 
         Window("Equalizer", id: "equalizer") {
@@ -91,6 +92,11 @@ private struct TrackCommands: Commands {
                 .disabled(selected.isEmpty)
             if model.bpmAnalyzer.isRunning {
                 Button("Stop Detecting BPM") { model.bpmAnalyzer.cancel() }
+            }
+            Button(TrackMenu.detectKeyTitle(for: selected)) { model.detectKey(for: selected) }
+                .disabled(selected.isEmpty)
+            if model.keyAnalyzer.isRunning {
+                Button("Stop Detecting Keys") { model.keyAnalyzer.cancel() }
             }
             Divider()
             Button("Play Next") { model.playNext(selected) }
@@ -161,16 +167,48 @@ private struct ControlsCommands: Commands {
                 .keyboardShortcut("u", modifiers: [.command, .option])
             Button("Equalizer") { openWindow(id: "equalizer") }
                 .keyboardShortcut("e", modifiers: [.command, .option])
-            Divider()
+        }
+    }
+}
+
+/// The two-deck mixer. Deck shortcuts use ⌃⌘ so they work while typing in the search field
+/// without taking letters from it.
+private struct MixerCommands: Commands {
+    let model: AppModel
+
+    var body: some Commands {
+        CommandMenu("Mixer") {
+            let mixer = model.mixer
             Button(model.isShowingMixer ? "Hide Mixer" : "Show Mixer") { model.isShowingMixer.toggle() }
                 .keyboardShortcut("m", modifiers: [.command, .shift])
             Button("Continue in Mixer") { model.continueInMixer() }
-                .disabled(player.currentTrack == nil)
-            Button(model.mixer.isAutoFading ? "Stop Crossfade" : "Crossfade") {
-                model.mixer.isAutoFading ? model.mixer.cancelAutoFade() : model.mixer.autoFade()
+                .disabled(model.player.currentTrack == nil)
+            Toggle("Show Beats", isOn: Binding(get: { model.isShowingBeatView }, set: { model.isShowingBeatView = $0 }))
+                .keyboardShortcut("b", modifiers: [.command, .control])
+            Divider()
+            ForEach(Mixer.Side.allCases) { side in
+                let deck = mixer.deck(side)
+                Button(deck.isPlaying ? "Pause Deck \(side.name)" : "Play Deck \(side.name)") { deck.togglePlay() }
+                    .keyboardShortcut(side == .a ? "1" : "2", modifiers: [.command, .control])
+                    .disabled(!deck.isReady)
+                Button("Cue Deck \(side.name)") { deck.cue() }
+                    .keyboardShortcut(side == .a ? "1" : "2", modifiers: [.command, .control, .option])
+                    .disabled(!deck.isReady)
+            }
+            Divider()
+            Button(mixer.isAutoFading ? "Stop Crossfade" : "Crossfade") {
+                mixer.isAutoFading ? mixer.cancelAutoFade() : mixer.autoFade()
             }
             .keyboardShortcut("x", modifiers: [.command, .shift])
             .disabled(!model.isShowingMixer)
+            Button("Crossfader Toward A") { mixer.moveCrossfader(to: mixer.crossfader - 0.1) }
+                .keyboardShortcut(.leftArrow, modifiers: [.command, .control])
+                .disabled(!model.isShowingMixer)
+            Button("Crossfader Toward B") { mixer.moveCrossfader(to: mixer.crossfader + 0.1) }
+                .keyboardShortcut(.rightArrow, modifiers: [.command, .control])
+                .disabled(!model.isShowingMixer)
+            Button("Center Crossfader") { mixer.moveCrossfader(to: 0.5) }
+                .disabled(!model.isShowingMixer)
         }
     }
 }
