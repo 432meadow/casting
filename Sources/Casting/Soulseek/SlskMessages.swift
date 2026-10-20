@@ -11,11 +11,17 @@ enum SlskServerCode: UInt32 {
     case login = 1
     case setWaitPort = 2
     case getPeerAddress = 3
+    case watchUser = 5
+    case unwatchUser = 6
+    case getUserStatus = 7
     case connectToPeer = 18
+    case messageUser = 22
+    case messageAcked = 23
     case fileSearch = 26
     case setStatus = 28
     case ping = 32
     case sharedFoldersFiles = 35
+    case getUserStats = 36
     case haveNoParent = 71
     case embeddedMessage = 93
     case acceptChildren = 100
@@ -135,6 +141,161 @@ enum SlskServerMessage {
         var body = SlskWriter()
         body.string(username)
         return frame(.branchRoot, body)
+    }
+
+    /// Code 22, sent: string username, string message. The server holds it for an offline
+    /// recipient and delivers it when they next log in.
+    static func messageUser(username: String, message: String) -> Data {
+        var body = SlskWriter()
+        body.string(username)
+        body.string(message)
+        return frame(.messageUser, body)
+    }
+
+    /// Code 23: u32 message ID. Without it the server sends the message again at every login.
+    static func messageAcked(id: UInt32) -> Data {
+        var body = SlskWriter()
+        body.u32(id)
+        return frame(.messageAcked, body)
+    }
+
+    /// Code 5: string username. The reply carries the user's status and stats; afterwards
+    /// the server sends a `GetUserStatus` whenever their status changes.
+    static func watchUser(_ username: String) -> Data {
+        var body = SlskWriter()
+        body.string(username)
+        return frame(.watchUser, body)
+    }
+
+    /// Code 6: string username. Stops the status updates `WatchUser` started; no reply.
+    static func unwatchUser(_ username: String) -> Data {
+        var body = SlskWriter()
+        body.string(username)
+        return frame(.unwatchUser, body)
+    }
+
+    /// Code 7, sent: string username. Answered with the user's current status.
+    static func getUserStatus(_ username: String) -> Data {
+        var body = SlskWriter()
+        body.string(username)
+        return frame(.getUserStatus, body)
+    }
+
+    /// Code 36, sent: string username. Answered with the user's current stats.
+    static func getUserStats(_ username: String) -> Data {
+        var body = SlskWriter()
+        body.string(username)
+        return frame(.getUserStats, body)
+    }
+}
+
+/// User status codes: 0 offline, 1 away, 2 online.
+enum SlskUserStatus: UInt32, Sendable, Codable {
+    case offline = 0
+    case away = 1
+    case online = 2
+}
+
+/// Code 22, received: u32 ID, u32 timestamp (Unix seconds), string username, string message,
+/// bool new. "New" is false when the server is re-sending a message that waited for us while
+/// we were offline (or that we never acknowledged).
+struct SlskPrivateMessage: Sendable, Equatable {
+    var id: UInt32
+    var timestamp: Date
+    var username: String
+    var message: String
+    var isNew: Bool
+
+    init(id: UInt32, timestamp: Date, username: String, message: String, isNew: Bool) {
+        self.id = id
+        self.timestamp = timestamp
+        self.username = username
+        self.message = message
+        self.isNew = isNew
+    }
+
+    init(parsing payload: Data) throws {
+        var reader = SlskReader(payload)
+        id = try reader.u32()
+        timestamp = Date(timeIntervalSince1970: TimeInterval(try reader.u32()))
+        username = try reader.string()
+        message = try reader.string()
+        isNew = (try? reader.bool()) ?? true
+    }
+}
+
+/// What the server tells us about a user's activity (codes 5 and 36).
+struct SlskUserStats: Sendable, Equatable {
+    /// Average upload speed, bytes/s.
+    var averageSpeed: UInt32
+    /// Uploaded files (rolls over after a while, per the spec).
+    var uploadCount: UInt32
+    var files: UInt32
+    var folders: UInt32
+
+    init(averageSpeed: UInt32, uploadCount: UInt32, files: UInt32, folders: UInt32) {
+        self.averageSpeed = averageSpeed
+        self.uploadCount = uploadCount
+        self.files = files
+        self.folders = folders
+    }
+
+    /// u32 avgspeed, u32 uploadnum, u32 unknown, u32 files, u32 dirs — shared by both replies.
+    fileprivate init(reading reader: inout SlskReader) throws {
+        averageSpeed = try reader.u32()
+        uploadCount = try reader.u32()
+        _ = try reader.u32()  // unknown
+        files = try reader.u32()
+        folders = try reader.u32()
+    }
+}
+
+/// Code 36, received: string username, then the stats.
+struct SlskUserStatsReply {
+    var username: String
+    var stats: SlskUserStats
+
+    init(parsing payload: Data) throws {
+        var reader = SlskReader(payload)
+        username = try reader.string()
+        stats = try SlskUserStats(reading: &reader)
+    }
+}
+
+/// Code 7, received: string username, u32 status, bool privileged.
+struct SlskUserStatusReply {
+    var username: String
+    var status: SlskUserStatus
+    var privileged: Bool
+
+    init(parsing payload: Data) throws {
+        var reader = SlskReader(payload)
+        username = try reader.string()
+        status = SlskUserStatus(rawValue: try reader.u32()) ?? .offline
+        privileged = (try? reader.bool()) ?? false
+    }
+}
+
+/// Code 5, received: string username, bool exists, and when the user exists u32 status,
+/// the stats, and (for away/online users) a country code we don't use.
+struct SlskWatchUserReply {
+    var username: String
+    var exists: Bool
+    var status: SlskUserStatus
+    var stats: SlskUserStats?
+
+    init(parsing payload: Data) throws {
+        var reader = SlskReader(payload)
+        username = try reader.string()
+        exists = try reader.bool()
+        guard exists else {
+            status = .offline
+            stats = nil
+            return
+        }
+        status = SlskUserStatus(rawValue: try reader.u32()) ?? .offline
+        stats = try SlskUserStats(reading: &reader)
+        // string country code follows for away/online users; not needed.
     }
 }
 
@@ -415,15 +576,29 @@ enum SlskPeerMessage {
         frame(.sharedFileListRequest, SlskWriter())
     }
 
-    /// Peer code 16: who we are, for the user-info pane of other clients.
-    static func userInfoResponse(description: String, totalUploads: UInt32, queueLength: UInt32, slotFree: Bool) -> Data {
+    /// Peer code 15: ask a peer about themselves. Empty body.
+    static func userInfoRequest() -> Data {
+        frame(.userInfoRequest, SlskWriter())
+    }
+
+    /// Peer code 16: who we are, for the user-info pane of other clients. string description,
+    /// bool has picture (+ bytes picture), u32 total upload slots, u32 queue size, bool slots
+    /// free, then the optional u32 upload permission (1 = everyone may upload to us; casting
+    /// takes no uploads, but that's what official clients send by default).
+    static func userInfoResponse(description: String, picture: Data? = nil, uploadSlots: UInt32,
+                                 queueLength: UInt32, slotFree: Bool) -> Data {
         var body = SlskWriter()
         body.string(description)
-        body.bool(false)  // no picture
-        body.u32(totalUploads)
+        if let picture, !picture.isEmpty {
+            body.bool(true)
+            body.bytes(picture)
+        } else {
+            body.bool(false)
+        }
+        body.u32(uploadSlots)
         body.u32(queueLength)
         body.bool(slotFree)
-        body.u32(1)  // uploads allowed to: everyone
+        body.u32(1)
         return frame(.userInfoResponse, body)
     }
 
@@ -448,6 +623,33 @@ enum SlskPeerMessage {
         body.string(path)
         body.u32(place)
         return frame(.placeInQueueResponse, body)
+    }
+}
+
+/// Peer code 16, received: what a user says about themselves. The trailing upload permission
+/// is optional (SoulseekQt leaves it out).
+struct SlskUserInfo: Sendable, Equatable {
+    var description: String
+    var picture: Data?
+    var uploadSlots: UInt32
+    var queueLength: UInt32
+    var slotFree: Bool
+
+    init(description: String, picture: Data?, uploadSlots: UInt32, queueLength: UInt32, slotFree: Bool) {
+        self.description = description
+        self.picture = picture
+        self.uploadSlots = uploadSlots
+        self.queueLength = queueLength
+        self.slotFree = slotFree
+    }
+
+    init(parsing payload: Data) throws {
+        var reader = SlskReader(payload)
+        description = try reader.string()
+        picture = try reader.bool() ? try reader.bytes() : nil
+        uploadSlots = try reader.u32()
+        queueLength = try reader.u32()
+        slotFree = try reader.bool()
     }
 }
 

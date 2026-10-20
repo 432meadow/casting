@@ -121,6 +121,22 @@ private struct SoulseekSettings: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            Section("Messages and User Info") {
+                LabeledContent("Description") {
+                    TextEditor(text: $soulseek.userDescription)
+                        .font(.body)
+                        .frame(height: 70)
+                        .scrollContentBackground(.hidden)
+                        .background(RoundedRectangle(cornerRadius: 5).fill(Color.secondary.opacity(0.08)))
+                }
+                Text("Other users see this when they look you up, along with your upload slots and queue.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Toggle("Notify when someone sends you a message", isOn: $soulseek.postsMessageNotifications)
+                Text("Conversations are kept on this Mac. Messages from blocked users are dropped.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Section("Connection") {
                 LabeledContent("Status") {
                     Text(soulseek.statusText)

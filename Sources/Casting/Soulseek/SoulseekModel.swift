@@ -40,6 +40,27 @@ struct SoulseekUpload: Identifiable {
     }
 }
 
+/// What casting knows about another user: server status and stats, and what they told us.
+struct SoulseekUserDetails {
+    enum InfoState {
+        case notRequested
+        case loading
+        case loaded(SlskUserInfo)
+        case failed(String)
+    }
+
+    var status: SlskUserStatus?
+    var privileged = false
+    var stats: SlskUserStats?
+    var info: InfoState = .notRequested
+}
+
+/// The user an info sheet is showing.
+struct SoulseekUserSheet: Identifiable {
+    let user: String
+    var id: String { user }
+}
+
 /// UI-facing Soulseek state: credentials, connection status, and the current search.
 @MainActor
 @Observable
@@ -50,6 +71,13 @@ final class SoulseekModel {
         case connected(user: String)
         case failed(String)
     }
+
+    /// The Soulseek view's tabs; kept here so right-click menus anywhere can switch tabs.
+    enum Pane: Hashable {
+        case search, wishlist, browse, messages, downloads
+    }
+
+    var pane: Pane = .search
 
     var username: String = UserDefaults.standard.string(forKey: "soulseek.username") ?? "" {
         didSet {
@@ -244,6 +272,141 @@ final class SoulseekModel {
     var postsNotifications: Bool = UserDefaults.standard.object(forKey: "soulseek.notifications") as? Bool ?? true {
         didSet { UserDefaults.standard.set(postsNotifications, forKey: "soulseek.notifications") }
     }
+    var postsMessageNotifications: Bool = UserDefaults.standard.object(forKey: "soulseek.messageNotifications") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(postsMessageNotifications, forKey: "soulseek.messageNotifications") }
+    }
+
+    // MARK: Private messages
+
+    let chats: SoulseekChats
+    /// The conversation picked in the Messages tab.
+    var selectedConversation: String? {
+        didSet { markSelectedConversationRead() }
+    }
+    /// True while the Messages tab is on screen; messages to the selected conversation then
+    /// arrive already read.
+    var isShowingMessages = false {
+        didSet { markSelectedConversationRead() }
+    }
+    @ObservationIgnored private var messageNotifyTasks: [String: Task<Void, Never>] = [:]
+    @ObservationIgnored private var pendingNotifications: [String: [SlskPrivateMessage]] = [:]
+
+    private var isReadingSelectedConversation: Bool {
+        isShowingMessages && NSApp?.isActive != false
+    }
+
+    private func markSelectedConversationRead() {
+        if isReadingSelectedConversation, let user = selectedConversation { chats.markRead(user) }
+    }
+
+    /// Opens (or starts) the conversation with `user` in the Messages tab.
+    func message(_ user: String) {
+        let user = user.trimmingCharacters(in: .whitespaces)
+        guard !user.isEmpty else { return }
+        chats.open(user)
+        selectedConversation = user
+        pane = .messages
+        watch(user)
+    }
+
+    func send(_ text: String, to user: String) {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, hasCredentials else { return }
+        let id = chats.addOutgoing(text, to: user)
+        connect()
+        Task {
+            await waitForConnection()
+            guard let client, case .connected = state else {
+                chats.markFailed(id, in: user)
+                return
+            }
+            do {
+                try await client.sendMessage(to: user, text: text)
+            } catch {
+                chats.markFailed(id, in: user)
+            }
+        }
+    }
+
+    func removeConversation(_ user: String) {
+        chats.remove(user)
+        if selectedConversation == user { selectedConversation = nil }
+    }
+
+    private func receive(_ message: SlskPrivateMessage) {
+        guard !blockedUsers.contains(message.username) else { return }
+        let reading = isReadingSelectedConversation && selectedConversation == message.username
+        chats.receive(message, unread: !reading)
+        if userDetails[message.username]?.status == nil { watch(message.username) }
+        guard postsMessageNotifications, !reading else { return }
+        // Offline messages arrive in a burst at login: one notification per sender.
+        pendingNotifications[message.username, default: []].append(message)
+        guard messageNotifyTasks[message.username] == nil else { return }
+        let user = message.username
+        messageNotifyTasks[user] = Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            messageNotifyTasks[user] = nil
+            let messages = pendingNotifications.removeValue(forKey: user) ?? []
+            guard let last = messages.last else { return }
+            let offline = messages.contains { !$0.isNew }
+            if messages.count == 1 {
+                Notifier.post(title: offline ? "\(user) (while you were away)" : user, body: last.message)
+            } else {
+                Notifier.post(title: user, body: "\(messages.count) new messages\(offline ? " while you were away" : "") — latest: \(last.message)")
+            }
+        }
+    }
+
+    // MARK: User info
+
+    /// Shown to other users who look us up (Settings ▸ Soulseek).
+    var userDescription: String = UserDefaults.standard.string(forKey: "soulseek.userDescription") ?? "" {
+        didSet {
+            guard userDescription != oldValue else { return }
+            UserDefaults.standard.set(userDescription, forKey: "soulseek.userDescription")
+            let description = userDescription
+            Task { await client?.setOwnInfo(description: description, picture: nil) }
+        }
+    }
+
+    private(set) var userDetails: [String: SoulseekUserDetails] = [:]
+    var userSheet: SoulseekUserSheet?
+    @ObservationIgnored private var watchedUsers = Set<String>()
+
+    /// Opens the info sheet for `user` and asks the server and the user for fresh details.
+    func showUserInfo(_ user: String) {
+        let user = user.trimmingCharacters(in: .whitespaces)
+        guard !user.isEmpty else { return }
+        userSheet = SoulseekUserSheet(user: user)
+        requestUserInfo(user)
+    }
+
+    func requestUserInfo(_ user: String) {
+        guard hasCredentials else { return }
+        userDetails[user, default: SoulseekUserDetails()].info = .loading
+        connect()
+        Task {
+            await waitForConnection()
+            guard let client, case .connected = state else {
+                userDetails[user, default: SoulseekUserDetails()].info = .failed("Not connected")
+                return
+            }
+            watch(user)
+            await client.requestStatusAndStats(of: user)
+            do {
+                let info = try await client.userInfo(of: user)
+                userDetails[user, default: SoulseekUserDetails()].info = .loaded(info)
+            } catch {
+                userDetails[user, default: SoulseekUserDetails()].info = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    /// Keeps a user's online status current (conversations and info sheets).
+    private func watch(_ user: String) {
+        guard let client, case .connected = state, watchedUsers.insert(user).inserted else { return }
+        Task { await client.watch(user: user) }
+    }
 
     // MARK: Browsing a user
 
@@ -263,6 +426,7 @@ final class SoulseekModel {
         let user = user.trimmingCharacters(in: .whitespaces)
         guard !user.isEmpty, hasCredentials else { return }
         browseUser = user
+        pane = .browse
         browseState = .loading(user: user)
         browseTask?.cancel()
         connect()
@@ -382,6 +546,11 @@ final class SoulseekModel {
 
     // MARK: Connection
 
+    /// `chats` nil loads the saved conversations.
+    init(chats: SoulseekChats? = nil) {
+        self.chats = chats ?? SoulseekChats()
+    }
+
     func connect() {
         guard hasCredentials, state != .connecting else { return }
         if case .connected = state { return }
@@ -396,11 +565,13 @@ final class SoulseekModel {
         }
         let blocked = Set(blockedUsers)
         let uploadLimit = limitsUploadSpeed ? max(1, uploadLimitKBps) * 1024 : nil
+        let description = userDescription
         Task {
             do {
                 await client.updateShares(shareSnapshot)
                 await client.updateBlockedUsers(blocked)
                 await client.setUploadLimit(uploadLimit)
+                await client.setOwnInfo(description: description, picture: nil)
                 try await client.connect()
             } catch {
                 await client.disconnect()
@@ -416,6 +587,7 @@ final class SoulseekModel {
         let client = client
         self.client = nil
         wishlistTask?.cancel()
+        forgetUserStatuses()
         state = .disconnected
         Task { await client?.disconnect() }
     }
@@ -425,11 +597,20 @@ final class SoulseekModel {
         case .connected(let user, _):
             state = .connected(user: user)
             startWishlistLoop()
+            for conversation in chats.conversations { watch(conversation.user) }
         case .disconnected(let reason):
             guard client != nil else { return }  // explicit disconnect already updated state
             client = nil
             wishlistTask?.cancel()
+            forgetUserStatuses()
             state = reason.map { .failed($0) } ?? .disconnected
+        case .privateMessage(let message):
+            receive(message)
+        case .userStatus(let user, let status, let privileged):
+            userDetails[user, default: SoulseekUserDetails()].status = status
+            userDetails[user, default: SoulseekUserDetails()].privileged = privileged
+        case .userStats(let user, let stats):
+            userDetails[user, default: SoulseekUserDetails()].stats = stats
         case .wishlistInterval(let seconds):
             if seconds > 0 { wishlistInterval = seconds }
         case .searchResults(let token, let batch):
@@ -465,6 +646,12 @@ final class SoulseekModel {
             guard let index = uploads.firstIndex(where: { $0.id == id }) else { return }
             uploads[index].state = newState
         }
+    }
+
+    /// Statuses go stale offline; the server resends them for watched users at the next login.
+    private func forgetUserStatuses() {
+        watchedUsers = []
+        for user in userDetails.keys { userDetails[user]?.status = nil }
     }
 
     // MARK: Sharing
