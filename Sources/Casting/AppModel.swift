@@ -63,6 +63,8 @@ final class AppModel {
     let player = Player()
     let mixer = Mixer()
     let soulseek = SoulseekModel()
+    /// M3U, Library.xml and Rekordbox XML import/export (AppModel+Exchange.swift).
+    let exchange = PlaylistExchange()
 
     /// The window's undo manager (set by the main view), for undoing edits and playlist changes.
     @ObservationIgnored weak var undoManager: UndoManager?
@@ -236,9 +238,10 @@ final class AppModel {
     /// True while a playlist (usually a smart one) is being evaluated.
     private(set) var isLoadingSelection = false
 
-    init() {
+    /// `libraryURL` lets tests use a throwaway database.
+    init(libraryURL: URL = LibraryStore.defaultURL) {
         do {
-            store = try LibraryStore()
+            store = try LibraryStore(url: libraryURL)
             try reload()
         } catch {
             fatalError = "Couldn't open the library: \(error.localizedDescription)"
@@ -413,7 +416,7 @@ final class AppModel {
 
     /// Smart playlist rules run off the main thread: a KVC predicate over 50k tracks takes a
     /// noticeable moment, and a folder of smart playlists multiplies that.
-    private func tracks(inPlaylist id: Int64) async -> [Track] {
+    func tracks(inPlaylist id: Int64) async -> [Track] {
         guard let store, let playlist = playlistsByID[id] else { return [] }
         do {
             switch playlist.kind {

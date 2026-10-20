@@ -145,6 +145,10 @@ struct SidebarView: View {
             Button("Move to Top Level") { model.movePlaylist(playlist.id, toFolder: nil, position: Int.max) }
         }
         Divider()
+        Button("Export Playlist…") { model.exportPlaylistAsM3U(playlist.id) }
+        Button("Import Playlist…") { model.chooseM3UToImport(into: playlist.kind == .folder ? playlist.id : playlist.parentID) }
+        Button("Export for Rekordbox…") { model.showRekordboxExport(choosing: [playlist.id], wholeLibrary: false) }
+        Divider()
         Button("Delete…", role: .destructive) { pendingDelete = playlist }
     }
 

@@ -60,6 +60,7 @@ struct ContentView: View {
         .sheet(item: $model.smartPlaylistDraft) { draft in
             SmartPlaylistEditor(draft: draft)
         }
+        .modifier(ExchangeSheets())
         .onAppear { model.undoManager = undoManager }
         .onChange(of: undoManager) { model.undoManager = undoManager }
         .confirmationDialog(removalTitle, isPresented: Binding(
@@ -133,6 +134,9 @@ struct ContentView: View {
             ? " · Writing tags \(model.tagWriter.done.formatted())/\(model.tagWriter.total.formatted())" : ""
         if model.isCheckingForMissingFiles {
             writing += " · Checking files…"
+        }
+        if let status = model.exchange.status {
+            writing += " · \(status)"
         }
         if model.bpmAnalyzer.isRunning {
             writing += " · Detecting BPM \(model.bpmAnalyzer.done.formatted())/\(model.bpmAnalyzer.total.formatted())"

@@ -148,6 +148,38 @@ xattr -dr com.apple.quarantine /Applications/casting.app
   read from them but not written. It's checked against generated chord progressions, not yet
   against a tagged library, so treat it as a first guess.
 
+**Import and export** (File menu; nothing here reads audio, it all comes from the database)
+- **M3U playlists**: **Export Playlist…** (File menu, or right-click a playlist) saves a playlist,
+  a smart playlist's current tracks, or everything in a folder as M3U8 (`#EXTM3U` with
+  `#EXTINF` length and "Artist - Title" lines), with paths **relative to the playlist file** or
+  **absolute** (relative paths fall back to absolute for files on another volume). **Import
+  Playlist…** (or drag `.m3u` / `.m3u8` files onto the window) makes a new playlist named after
+  the file: entries are matched to library tracks by path (also when the case or accent
+  encoding differs, `file://` URLs, relative and Windows-style paths), files that exist but
+  aren't in the library are added, and a summary lists how many matched, were added and
+  weren't found. Imported from a folder's right-click menu, it lands in that folder.
+- **Import from Apple Music…** reads a library exported from Music or iTunes (File ▸ Library ▸
+  Export Library…, a `Library.xml`; dropping one on the window works too). Tracks are matched by
+  path, and a preview shows what would change before anything does, with the option to add the
+  files that are on disk but not in the library. It only fills gaps or brings values forward:
+  ratings only where casting has none (ratings inherited from the album are ignored), the
+  higher play count (adding them would count plays from before the switch twice), the later
+  last played and the earlier date added. Playlists and folders are recreated inside a new
+  **Apple Music** folder; the whole-library and media-kind lists (Library, Music, Downloaded,
+  Podcasts…) are skipped. Skip counts stay casting's own (they come from its listen log).
+  Everything goes into casting's database only, never into the files, and one **Undo** puts it
+  all back (tracks it added stay in the library, as with Add to Library).
+- **Export Rekordbox XML…** (or right-click a playlist ▸ Export for Rekordbox…) writes the
+  whole library or the chosen playlists and their tracks in Rekordbox's `DJ_PLAYLISTS` format:
+  tags, size, length, BPM, key (as Rekordbox writes it: Am, F#, Ebm), rating (51 per star),
+  play count, date added and a `file://localhost/` location, with the playlist folders as
+  they are in the sidebar (smart playlists as their current tracks). Tracks that have been on a
+  mixer deck also get their beat grid (a `TEMPO` with the fitted tempo and first beat); the
+  grids are remembered in `BeatGrids.json` next to the library, so the library isn't analysed
+  on export. Load it in Rekordbox under Preferences ▸ Advanced ▸ rekordbox xml.
+- Exports are written to a temp file next to the target and renamed over it, so a failed export
+  never leaves half a file.
+
 **Playback**
 - Gapless playback; shuffle (⌥⌘S), repeat off/all/one (⌘R).
 - **Up Next** panel (⌥⌘U): Play Next (⌥↩), Add to Queue (⌥⇧↩), reorder, remove, jump.
@@ -299,14 +331,15 @@ volume (SMB, AFP, NFS) can arrive slowly (the share casting was developed agains
 | `Sources/Casting/Library/` | SQLite wrapper, store (+ editing, history, listen log, removal, saved tag writes), listening stats, artist index and discography matching, smart playlist predicates, tag reader, albums, artwork, BPM and key detection, search scopes, duplicate and missing-file checks |
 | `Sources/Casting/Library/TagWriting/` | ID3 / FLAC / MP4 tag writers, safe file replacement, background write queue |
 | `Sources/Casting/Playback/` | Player (queue, gapless, shuffle/repeat), two-deck mixer and track analysis (waveforms, beat grid), file cache, EQ, output devices, Now Playing |
+| `Sources/Casting/Exchange/` | M3U playlists, Apple Music / iTunes `Library.xml` reader and import plan, Rekordbox XML writer, path matching, atomic export writes, remembered beat grids |
 | `Sources/Casting/Metadata/` | MusicBrainz / Wikipedia / ListenBrainz client for artist pages (rate limit, disk cache) |
 | `Sources/Casting/Soulseek/` | Soulseek client: wire codec, messages, client actor (server + peer connections), UI model |
-| `Sources/Casting/AppModel*.swift` | App state, selection, actions and undo, scanning, library housekeeping |
+| `Sources/Casting/AppModel*.swift` | App state, selection, actions and undo, scanning, library housekeeping, import and export |
 | `Sources/Casting/Updater.swift` | Sparkle in-app updates (Check for Updates…, automatic checks) |
 | `Sources/Casting/Reporting/` | Bug reports: event log, diagnostics, redaction, crash report summaries, the GitHub issue link |
-| `Sources/Casting/UI/` | Track table (NSTableView), sidebar, albums, browser, Up Next, Get Info, smart editor, EQ, mixer, settings, menu bar |
+| `Sources/Casting/UI/` | Track table (NSTableView), sidebar, albums, browser, Up Next, Get Info, smart editor, EQ, mixer, Rekordbox export sheet, settings, menu bar |
 | `Sources/ObjCSupport/` | Catches NSExceptions (predicate evaluation, audio graph connections) |
-| `Tests/CastingTests/` | 141 tests: listening stats, the listen log (store, v2→v3 upgrade, player skip/pause/stop tracking), discography matching, artist index, smart playlist predicates, albums/artwork, library editing, history/removal/saved tag writes and the v1→v2 upgrade, search scopes, duplicates, missing-file checks, tag reading and writing (on generated files), BPM detection (generated drum patterns, WAV and FLAC excerpts), beat grids (click tracks) and keys (chord progressions), player, mixer, bug reports (redaction, issue links, crash summaries, event log), Soulseek codec + loopback client tests (search, wishlist, browse, download, resume, denial, blocking, serving searches + uploads, upload speed limit) against a mock server |
+| `Tests/CastingTests/` | 154 tests: listening stats, the listen log (store, v2→v3 upgrade, player skip/pause/stop tracking), discography matching, artist index, smart playlist predicates, albums/artwork, library editing, history/removal/saved tag writes and the v1→v2 upgrade, search scopes, duplicates, missing-file checks, tag reading and writing (on generated files), BPM detection (generated drum patterns, WAV and FLAC excerpts), beat grids (click tracks) and keys (chord progressions), player, mixer, import and export (M3U round trips and other apps' playlists, a generated `Library.xml` and the import plan, the Rekordbox XML shape), bug reports (redaction, issue links, crash summaries, event log), Soulseek codec + loopback client tests (search, wishlist, browse, download, resume, denial, blocking, serving searches + uploads, upload speed limit) against a mock server |
 
 ## Known issues
 

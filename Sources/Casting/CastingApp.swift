@@ -35,6 +35,14 @@ struct CastingApp: App {
                     .keyboardShortcut("o", modifiers: .command)
                     .disabled(model.isScanning)
                 Divider()
+                Button("Import Playlist…") { model.chooseM3UToImport() }
+                Button("Export Playlist…") { if let id = model.selectedPlaylistID { model.exportPlaylistAsM3U(id) } }
+                    .disabled(model.selectedPlaylistID == nil)
+                Button("Import from Apple Music…") { model.chooseLibraryXMLToImport() }
+                    .disabled(model.exchange.status != nil)
+                Button("Export Rekordbox XML…") { model.showRekordboxExport(choosing: model.selectedPlaylistID.map { [$0] } ?? [], wholeLibrary: true) }
+                    .disabled(model.exchange.status != nil)
+                Divider()
                 Button(model.isCheckingForMissingFiles ? "Checking for Missing Files…" : "Check for Missing Files") {
                     model.checkForMissingFiles()
                 }
