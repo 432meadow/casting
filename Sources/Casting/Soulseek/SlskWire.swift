@@ -5,9 +5,10 @@ import Foundation
 /// u32-length-prefixed frames, and the zlib wrapping used by file lists and search results.
 /// Layouts follow Nicotine+ 3.3.10's `doc/SLSKPROTOCOL.md`.
 
-struct SlskError: Error, CustomStringConvertible {
+struct SlskError: LocalizedError, CustomStringConvertible {
     let message: String
     var description: String { message }
+    var errorDescription: String? { message }
 }
 
 // MARK: Writer
@@ -106,6 +107,11 @@ struct SlskReader {
     mutating func string() throws -> String {
         let bytes = try take(Int(try u32()))
         return String(data: bytes, encoding: .utf8) ?? String(data: bytes, encoding: .isoLatin1) ?? ""
+    }
+
+    /// A u32 length, then that many raw bytes (pictures in user info).
+    mutating func bytes() throws -> Data {
+        Data(try take(Int(try u32())))
     }
 
     /// IPv4 addresses are a u32 whose bytes are reversed relative to network order.

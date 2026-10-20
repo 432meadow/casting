@@ -11,6 +11,11 @@ enum SlskEvent: Sendable {
     case uploadState(id: UUID, state: SlskUploadState)
     /// How often the server wants wishlist searches repeated.
     case wishlistInterval(seconds: Int)
+    /// A private message from another user (already acknowledged to the server).
+    case privateMessage(SlskPrivateMessage)
+    /// A user went online, away or offline (watched users, or a status query).
+    case userStatus(username: String, status: SlskUserStatus, privileged: Bool)
+    case userStats(username: String, stats: SlskUserStats)
 }
 
 enum SlskUploadState: Equatable, Sendable {
@@ -53,6 +58,9 @@ enum SlskDownloadState: Equatable, Sendable {
 /// connection, the peer answers with a `TransferRequest` (on any P connection, possibly much
 /// later), we allow it, and the file arrives on a separate `F` connection as raw bytes after a
 /// token/offset exchange.
+///
+/// Private messages and user status ride the server connection; user info (description,
+/// picture, slots) is asked of the peer directly, like a browse.
 actor SoulseekClient {
     static let defaultServer = (host: "server.slsknet.org", port: UInt16(2242))
     private static let maxPeerConnections = 96
@@ -116,7 +124,6 @@ actor SoulseekClient {
     private static let maxUploadSlots = 2
     private var uploadQueue: [UploadJob] = []
     private var activeUploadCount = 0
-    private var totalUploadCount: UInt32 = 0
     /// Downloaders answer our upload `TransferRequest` with a `TransferResponse` by token.
     private var transferResponseWaiters: [UInt32: CheckedContinuation<SlskTransferResponse?, Never>] = [:]
     /// Total upload rate cap in bytes/s (nil = unlimited), and when the next chunk may go out.
@@ -129,6 +136,14 @@ actor SoulseekClient {
 
     /// People waiting for a user's share list (peer code 5), by request.
     private var browseWaiters: [UUID: (user: String, continuation: CheckedContinuation<SlskSharedFileList?, Never>)] = [:]
+
+    // MARK: User info state
+
+    /// What we tell peers who ask about us (peer code 16).
+    private var ownDescription = ""
+    private var ownPicture: Data?
+    /// People waiting for a user's info (peer code 16), by request.
+    private var userInfoWaiters: [UUID: (user: String, continuation: CheckedContinuation<SlskUserInfo?, Never>)] = [:]
 
     init(
         username: String,
@@ -198,6 +213,10 @@ actor SoulseekClient {
         fileTransferPierceTokens = []
         for continuation in transferResponseWaiters.values { continuation.resume(returning: nil) }
         transferResponseWaiters = [:]
+        for waiter in browseWaiters.values { waiter.continuation.resume(returning: nil) }
+        browseWaiters = [:]
+        for waiter in userInfoWaiters.values { waiter.continuation.resume(returning: nil) }
+        userInfoWaiters = [:]
         for job in uploadQueue { onEvent(.uploadState(id: job.id, state: .failed(reason ?? "Disconnected"))) }
         uploadQueue = []
         activeUploadCount = 0
@@ -273,6 +292,83 @@ actor SoulseekClient {
         }
     }
 
+    // MARK: Private messages
+
+    /// Sends a private message. The server stores it if `user` is offline and hands it over
+    /// when they next log in.
+    func sendMessage(to user: String, text: String) async throws {
+        guard isLoggedIn, let server else { throw SlskError(message: "Not connected") }
+        try await server.send(SlskServerMessage.messageUser(username: user, message: text))
+    }
+
+    /// Every message is acknowledged, or the server sends it again at the next login — even
+    /// a blocked user's, which is then dropped.
+    private func receivedPrivateMessage(_ message: SlskPrivateMessage) async {
+        try? await server?.send(SlskServerMessage.messageAcked(id: message.id))
+        guard !blockedUsers.contains(message.username) else { return }
+        onEvent(.privateMessage(message))
+    }
+
+    // MARK: User status and info
+
+    /// Asks the server to keep us posted on `user`'s status; the first answer also brings
+    /// their stats.
+    func watch(user: String) async {
+        guard isLoggedIn, let server else { return }
+        try? await server.send(SlskServerMessage.watchUser(user))
+    }
+
+    func unwatch(user: String) async {
+        guard isLoggedIn, let server else { return }
+        try? await server.send(SlskServerMessage.unwatchUser(user))
+    }
+
+    /// Fresh status and stats for `user`; answers arrive as `.userStatus` / `.userStats`.
+    func requestStatusAndStats(of user: String) async {
+        guard isLoggedIn, let server else { return }
+        try? await server.send(SlskServerMessage.getUserStatus(user))
+        try? await server.send(SlskServerMessage.getUserStats(user))
+    }
+
+    /// What we answer when someone asks about us.
+    func setOwnInfo(description: String, picture: Data?) {
+        ownDescription = description
+        ownPicture = picture
+    }
+
+    /// Asks `user` directly for their description, picture and upload slots.
+    func userInfo(of user: String) async throws -> SlskUserInfo {
+        guard isLoggedIn else { throw SlskError(message: "Not connected") }
+        guard let channel = await channel(to: user) else { throw SlskError(message: "Couldn't connect to \(user)") }
+        let id = UUID()
+        let info = await withCheckedContinuation { (continuation: CheckedContinuation<SlskUserInfo?, Never>) in
+            userInfoWaiters[id] = (user, continuation)
+            Task {
+                do {
+                    try await channel.send(SlskPeerMessage.userInfoRequest())
+                } catch {
+                    self.finishUserInfo(id, with: nil)
+                }
+            }
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(60))
+                await self?.finishUserInfo(id, with: nil)
+            }
+        }
+        guard let info else { throw SlskError(message: "\(user) didn't answer") }
+        return info
+    }
+
+    private func finishUserInfo(_ id: UUID, with info: SlskUserInfo?) {
+        userInfoWaiters.removeValue(forKey: id)?.continuation.resume(returning: info)
+    }
+
+    private func receivedUserInfo(_ info: SlskUserInfo, from user: String) {
+        for (id, waiter) in userInfoWaiters where waiter.user == user {
+            finishUserInfo(id, with: info)
+        }
+    }
+
     // MARK: Limits
 
     /// Caps the total upload rate (bytes/s); nil or 0 lifts the cap.
@@ -335,7 +431,7 @@ actor SoulseekClient {
             while let chunk = try await server.receive() {
                 frames.append(chunk)
                 while let frame = try frames.nextFrame() {
-                    try handleServerFrame(frame)
+                    try await handleServerFrame(frame)
                 }
             }
             await shutDown(reason: "Server closed the connection")
@@ -345,7 +441,7 @@ actor SoulseekClient {
         }
     }
 
-    private func handleServerFrame(_ frame: Data) throws {
+    private func handleServerFrame(_ frame: Data) async throws {
         var reader = SlskReader(frame)
         let code = try reader.u32()
         let payload = Data(frame.dropFirst(4))
@@ -378,6 +474,23 @@ actor SoulseekClient {
         case .wishlistInterval:
             var reader = SlskReader(payload)
             if let seconds = try? reader.u32() { onEvent(.wishlistInterval(seconds: Int(seconds))) }
+        case .messageUser:
+            if let message = try? SlskPrivateMessage(parsing: payload) {
+                await receivedPrivateMessage(message)
+            }
+        case .watchUser:
+            if let reply = try? SlskWatchUserReply(parsing: payload) {
+                onEvent(.userStatus(username: reply.username, status: reply.status, privileged: false))
+                if let stats = reply.stats { onEvent(.userStats(username: reply.username, stats: stats)) }
+            }
+        case .getUserStatus:
+            if let reply = try? SlskUserStatusReply(parsing: payload) {
+                onEvent(.userStatus(username: reply.username, status: reply.status, privileged: reply.privileged))
+            }
+        case .getUserStats:
+            if let reply = try? SlskUserStatsReply(parsing: payload) {
+                onEvent(.userStats(username: reply.username, stats: reply.stats))
+            }
         case .possibleParents:
             guard !hasParent, !adoptingParent,
                   let candidates = try? SlskPossibleParents(parsing: payload),
@@ -612,11 +725,17 @@ actor SoulseekClient {
                     receivedFileList(list)
                 }
             case .userInfoRequest:
+                guard username.map(blockedUsers.contains) != true else { break }
                 try? await connection.send(SlskPeerMessage.userInfoResponse(
-                    description: "casting on macOS",
-                    totalUploads: totalUploadCount,
-                    queueLength: UInt32(uploadQueue.count),
+                    description: ownDescription,
+                    picture: ownPicture,
+                    uploadSlots: UInt32(Self.maxUploadSlots),
+                    queueLength: UInt32(uploadQueue.filter { !$0.started }.count),
                     slotFree: activeUploadCount < Self.maxUploadSlots))
+            case .userInfoResponse:
+                if let username, let info = try? SlskUserInfo(parsing: payload) {
+                    receivedUserInfo(info, from: username)
+                }
             case .placeInQueueRequest:
                 if let request = try? SlskPlaceInQueueRequest(parsing: payload), let username {
                     let waiting = uploadQueue.filter { !$0.started }
@@ -758,7 +877,6 @@ actor SoulseekClient {
     }
 
     private func finishUpload(_ job: UploadJob, state: SlskUploadState) {
-        if case .finished = state { totalUploadCount += 1 }
         onEvent(.uploadState(id: job.id, state: state))
         uploadQueue.removeAll { $0.id == job.id }
         activeUploadCount = max(0, activeUploadCount - 1)

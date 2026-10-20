@@ -365,3 +365,168 @@ import Testing
         #expect(result.availability == 0)
     }
 }
+
+@Suite struct SlskMessagingCodecTests {
+    @Test func messageUserAndAckMatchTheSpec() throws {
+        var reader = SlskReader(SlskServerMessage.messageUser(username: "friend", message: "héllo"))
+        _ = try reader.u32()
+        #expect(try reader.u32() == 22)
+        #expect(try reader.string() == "friend")
+        #expect(try reader.string() == "héllo")
+        #expect(reader.isAtEnd)
+
+        reader = SlskReader(SlskServerMessage.messageAcked(id: 0xABCD))
+        _ = try reader.u32()
+        #expect(try reader.u32() == 23)
+        #expect(try reader.u32() == 0xABCD)
+        #expect(reader.isAtEnd)
+    }
+
+    @Test func userLookupsCarryJustTheUsername() throws {
+        for (message, code) in [
+            (SlskServerMessage.watchUser("someone"), UInt32(5)),
+            (SlskServerMessage.unwatchUser("someone"), 6),
+            (SlskServerMessage.getUserStatus("someone"), 7),
+            (SlskServerMessage.getUserStats("someone"), 36),
+        ] {
+            var reader = SlskReader(message)
+            #expect(Int(try reader.u32()) == message.count - 4)
+            #expect(try reader.u32() == code)
+            #expect(try reader.string() == "someone")
+            #expect(reader.isAtEnd)
+        }
+    }
+
+    @Test func receivedPrivateMessageParses() throws {
+        var body = SlskWriter()
+        body.u32(77)
+        body.u32(1_600_000_000)
+        body.string("friend")
+        body.string("are you around?")
+        body.bool(false)
+        let message = try SlskPrivateMessage(parsing: body.data)
+        #expect(message.id == 77)
+        #expect(message.timestamp == Date(timeIntervalSince1970: 1_600_000_000))
+        #expect(message.username == "friend")
+        #expect(message.message == "are you around?")
+        #expect(!message.isNew)
+    }
+
+    @Test func watchUserReplyParsesBothOutcomes() throws {
+        var body = SlskWriter()
+        body.string("someone")
+        body.bool(true)
+        body.u32(1)  // away
+        for value: UInt32 in [1000, 5, 0, 300, 20] { body.u32(value) }
+        body.string("DE")
+        let reply = try SlskWatchUserReply(parsing: body.data)
+        #expect(reply.exists)
+        #expect(reply.status == .away)
+        #expect(reply.stats == SlskUserStats(averageSpeed: 1000, uploadCount: 5, files: 300, folders: 20))
+
+        var missing = SlskWriter()
+        missing.string("nobody")
+        missing.bool(false)
+        let none = try SlskWatchUserReply(parsing: missing.data)
+        #expect(!none.exists)
+        #expect(none.status == .offline)
+        #expect(none.stats == nil)
+    }
+
+    @Test func statusAndStatsRepliesParse() throws {
+        var status = SlskWriter()
+        status.string("someone")
+        status.u32(2)
+        status.bool(true)
+        let statusReply = try SlskUserStatusReply(parsing: status.data)
+        #expect(statusReply.status == .online)
+        #expect(statusReply.privileged)
+
+        var stats = SlskWriter()
+        stats.string("someone")
+        for value: UInt32 in [64_000, 9, 0, 10_000, 800] { stats.u32(value) }
+        let statsReply = try SlskUserStatsReply(parsing: stats.data)
+        #expect(statsReply.username == "someone")
+        #expect(statsReply.stats == SlskUserStats(averageSpeed: 64_000, uploadCount: 9, files: 10_000, folders: 800))
+    }
+
+    @Test func userInfoRoundTripsWithAndWithoutAPicture() throws {
+        for picture in [nil, Data([1, 2, 3, 4, 5])] as [Data?] {
+            let message = SlskPeerMessage.userInfoResponse(
+                description: "about me", picture: picture, uploadSlots: 2, queueLength: 4, slotFree: true)
+            var reader = SlskReader(message)
+            #expect(Int(try reader.u32()) == message.count - 4)
+            #expect(try reader.u32() == 16)
+            let info = try SlskUserInfo(parsing: Data(message.dropFirst(8)))
+            #expect(info == SlskUserInfo(description: "about me", picture: picture, uploadSlots: 2, queueLength: 4, slotFree: true))
+        }
+        // SoulseekQt leaves out the trailing upload permission.
+        var short = SlskWriter()
+        short.string("qt user")
+        short.bool(false)
+        short.u32(1)
+        short.u32(0)
+        short.bool(false)
+        #expect(try SlskUserInfo(parsing: short.data).description == "qt user")
+    }
+
+    @Test func userInfoRequestIsEmpty() throws {
+        #expect(SlskPeerMessage.userInfoRequest() == Data([4, 0, 0, 0, 15, 0, 0, 0]))
+    }
+}
+
+@MainActor
+@Suite struct SoulseekChatsTests {
+    private func message(_ id: UInt32, from user: String, _ text: String, at seconds: TimeInterval, isNew: Bool = true) -> SlskPrivateMessage {
+        SlskPrivateMessage(id: id, timestamp: Date(timeIntervalSince1970: seconds), username: user, message: text, isNew: isNew)
+    }
+
+    @Test func conversationsSortLatestFirstAndCountUnread() {
+        let chats = SoulseekChats(fileURL: nil)
+        chats.receive(message(1, from: "a", "first", at: 100), unread: true)
+        chats.receive(message(2, from: "b", "second", at: 200), unread: true)
+        chats.receive(message(3, from: "a", "third", at: 300), unread: true)
+        #expect(chats.conversations.map(\.user) == ["a", "b"])
+        #expect(chats.conversation(with: "a")?.unread == 2)
+        #expect(chats.unreadTotal == 3)
+
+        chats.markRead("a")
+        #expect(chats.unreadTotal == 1)
+        chats.addOutgoing("reply", to: "b")
+        #expect(chats.conversations.first?.user == "b")
+        #expect(chats.conversation(with: "b")?.messages.last?.isOutgoing == true)
+    }
+
+    @Test func offlineMessagesSlotInByTimestamp() {
+        let chats = SoulseekChats(fileURL: nil)
+        chats.receive(message(1, from: "a", "later", at: 500), unread: false)
+        chats.receive(message(2, from: "a", "earlier", at: 100, isNew: false), unread: true)
+        let messages = chats.conversation(with: "a")?.messages ?? []
+        #expect(messages.map(\.text) == ["earlier", "later"])
+        #expect(messages.first?.wasOffline == true)
+    }
+
+    @Test func historyPersists() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("casting-chats-\(UUID().uuidString)/Messages.json")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        let chats = SoulseekChats(fileURL: url)
+        chats.receive(message(1, from: "friend", "hello", at: 1_000), unread: true)
+        let sent = chats.addOutgoing("hi back", to: "friend")
+        chats.markFailed(sent, in: "friend")
+        chats.open("someone new")
+        SoulseekChats.flushWrites()
+
+        let reloaded = SoulseekChats(fileURL: url)
+        #expect(Set(reloaded.conversations.map(\.user)) == ["friend", "someone new"])
+        let friend = try #require(reloaded.conversation(with: "friend"))
+        #expect(friend.messages.map(\.text) == ["hello", "hi back"])
+        #expect(friend.messages.last?.failed == true)
+        #expect(friend.unread == 1)
+
+        reloaded.remove("friend")
+        SoulseekChats.flushWrites()
+        #expect(SoulseekChats(fileURL: url).conversation(with: "friend") == nil)
+    }
+}

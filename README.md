@@ -182,7 +182,7 @@ xattr -dr com.apple.quarantine /Applications/casting.app
   log in `~/Library/Logs/casting/events.log` that survives a crash.
 - Queue and position are restored (paused) on the next launch.
 
-**Soulseek** (phases 1–3: search + downloads + sharing)
+**Soulseek** (phases 1–4: search + downloads + sharing + messages)
 - Native Soulseek client (sidebar ▸ Network ▸ Soulseek): connect with a username/password set in
   Settings ▸ Soulseek (password lives in the keychain; a brand-new username is auto-registered by
   the network on first login) and search the network. Results stream in from peers with format,
@@ -213,7 +213,8 @@ xattr -dr com.apple.quarantine /Applications/casting.app
   **Group by folder**, which folds results into one row per user + remote folder (total size and
   length, "Mixed" when formats differ) that downloads the whole folder.
 - **Block users** (right-click a result or an upload): their results are hidden, and they get no
-  search results, an empty share list, and "Banned" for upload requests. Settings ▸ Soulseek
+  search results, an empty share list, no user info, and "Banned" for upload requests; their
+  messages are dropped. Settings ▸ Soulseek
   lists them with Unblock.
 - **Browse** tab (or right-click a result/transfer ▸ Browse *user*'s Files): fetches the user's
   whole share (peer code 4 → 5, zlib file list; bare file names are joined to their folder).
@@ -223,8 +224,25 @@ xattr -dr com.apple.quarantine /Applications/casting.app
   connected, one is re-run per interval, round robin, with the server's `WishlistSearch` (code
   103) at the interval it sends (code 104, default 12 minutes). New results are counted per
   search (and on the tab) until you look; results are kept for the session.
+- **Messages** tab: private conversations, latest first, with unread counts on each one, on the
+  tab and on the sidebar's Soulseek row, and a dot for whether the user is online, away or
+  offline (the server's `WatchUser` / `GetUserStatus`, codes 5 and 7). Start one from the
+  username field there, or right-click a result, a transfer or a browsed user ▸ **Message
+  *user***. Messages go through the server (`MessageUser`, code 22), which holds them for
+  offline users; every message received is acknowledged (`MessageAcked`, code 23) so it isn't
+  sent again, and ones that waited for you arrive at login marked as sent while you were
+  offline. Blocked users' messages are dropped. History is kept in
+  `~/Library/Application Support/casting/Soulseek/Messages.json`.
+- **User info** (right-click ▸ Show Info, or Info in a conversation): a sheet with the user's
+  status, the server's stats (`GetUserStats`, code 36: average speed, uploads, files and
+  folders), and what the user reports about themselves (peer `UserInfoRequest` → `UserInfoResponse`,
+  codes 15 → 16: description, picture, upload slots, queue, free slot), with Browse Files,
+  Message and Block. casting answers the same request with the description from Settings ▸
+  Soulseek, its two upload slots, its queue and whether a slot is free (blocked users get no
+  answer).
 - **Notifications** (Settings ▸ Soulseek, on by default) when a download folder finishes and is
-  imported, and when a saved search turns up new results. They need the app bundle (not
+  imported, and when a saved search turns up new results; a separate switch covers private
+  messages (one per sender, so a burst at login doesn't flood). They need the app bundle (not
   `swift run`).
 - **Upload speed limit** (Settings ▸ Soulseek): one cap for all uploads together, paced in small
   chunks so the rate stays even. **Connect when casting starts** keeps the share and wishlist
@@ -300,13 +318,13 @@ volume (SMB, AFP, NFS) can arrive slowly (the share casting was developed agains
 | `Sources/Casting/Library/TagWriting/` | ID3 / FLAC / MP4 tag writers, safe file replacement, background write queue |
 | `Sources/Casting/Playback/` | Player (queue, gapless, shuffle/repeat), two-deck mixer and track analysis (waveforms, beat grid), file cache, EQ, output devices, Now Playing |
 | `Sources/Casting/Metadata/` | MusicBrainz / Wikipedia / ListenBrainz client for artist pages (rate limit, disk cache) |
-| `Sources/Casting/Soulseek/` | Soulseek client: wire codec, messages, client actor (server + peer connections), UI model |
+| `Sources/Casting/Soulseek/` | Soulseek client: wire codec, messages, client actor (server + peer connections), UI model, private conversations (saved to disk) |
 | `Sources/Casting/AppModel*.swift` | App state, selection, actions and undo, scanning, library housekeeping |
 | `Sources/Casting/Updater.swift` | Sparkle in-app updates (Check for Updates…, automatic checks) |
 | `Sources/Casting/Reporting/` | Bug reports: event log, diagnostics, redaction, crash report summaries, the GitHub issue link |
-| `Sources/Casting/UI/` | Track table (NSTableView), sidebar, albums, browser, Up Next, Get Info, smart editor, EQ, mixer, settings, menu bar |
+| `Sources/Casting/UI/` | Track table (NSTableView), sidebar, albums, browser, Up Next, Get Info, smart editor, EQ, mixer, Soulseek (+ messages and user info), settings, menu bar |
 | `Sources/ObjCSupport/` | Catches NSExceptions (predicate evaluation, audio graph connections) |
-| `Tests/CastingTests/` | 141 tests: listening stats, the listen log (store, v2→v3 upgrade, player skip/pause/stop tracking), discography matching, artist index, smart playlist predicates, albums/artwork, library editing, history/removal/saved tag writes and the v1→v2 upgrade, search scopes, duplicates, missing-file checks, tag reading and writing (on generated files), BPM detection (generated drum patterns, WAV and FLAC excerpts), beat grids (click tracks) and keys (chord progressions), player, mixer, bug reports (redaction, issue links, crash summaries, event log), Soulseek codec + loopback client tests (search, wishlist, browse, download, resume, denial, blocking, serving searches + uploads, upload speed limit) against a mock server |
+| `Tests/CastingTests/` | 158 tests: listening stats, the listen log (store, v2→v3 upgrade, player skip/pause/stop tracking), discography matching, artist index, smart playlist predicates, albums/artwork, library editing, history/removal/saved tag writes and the v1→v2 upgrade, search scopes, duplicates, missing-file checks, tag reading and writing (on generated files), BPM detection (generated drum patterns, WAV and FLAC excerpts), beat grids (click tracks) and keys (chord progressions), player, mixer, bug reports (redaction, issue links, crash summaries, event log), Soulseek codec + loopback client tests (search, wishlist, browse, download, resume, denial, blocking, serving searches + uploads, upload speed limit, private messages and acks, offline messages, user info and stats) against a mock server, and saved conversations |
 
 ## Known issues
 

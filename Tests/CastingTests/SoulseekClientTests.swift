@@ -44,7 +44,7 @@ import Testing
             case .disconnected(let reason):
                 Issue.record("unexpected disconnect: \(reason ?? "-")")
                 continuation.finish()
-            case .downloadState, .uploadStarted, .uploadState, .wishlistInterval:
+            default:
                 break
             }
         }
@@ -309,7 +309,211 @@ import Testing
         #expect(mock.receivedFile == fileData)
     }
 
+    // MARK: Private messages
+
+    @Test func receivesAndAcknowledgesPrivateMessages() async throws {
+        let mock = try await MockSoulseekServer()
+        defer { mock.stop() }
+        let (client, events, continuation) = makeClient(mock)
+        try await client.connect()
+        try await mock.deliverMessage(id: 501, from: "friend", text: "hello there", isNew: true)
+
+        var received: SlskPrivateMessage?
+        let deadline = finish(continuation, after: 10)
+        for await event in events {
+            if case .privateMessage(let message) = event {
+                received = message
+                continuation.finish()
+            }
+        }
+        deadline.cancel()
+        try await waitUntil { mock.ackedMessageIDs.contains(501) }
+        await client.disconnect()
+
+        let message = try #require(received)
+        #expect(message.id == 501)
+        #expect(message.username == "friend")
+        #expect(message.message == "hello there")
+        #expect(message.isNew)
+        #expect(message.timestamp == Date(timeIntervalSince1970: 1_700_000_000))
+        #expect(mock.ackedMessageIDs == [501])
+        #expect(mock.failures.isEmpty)
+    }
+
+    @Test func sendsPrivateMessages() async throws {
+        let mock = try await MockSoulseekServer()
+        defer { mock.stop() }
+        let client = SoulseekClient(username: "tester", password: "secret", server: (host: "127.0.0.1", port: mock.port)) { _ in }
+        try await client.connect()
+        try await client.sendMessage(to: "friend", text: "got any more of that album?")
+        try await waitUntil { !mock.sentMessages.isEmpty }
+        await client.disconnect()
+
+        #expect(mock.sentMessages.map(\.user) == ["friend"])
+        #expect(mock.sentMessages.map(\.text) == ["got any more of that album?"])
+        #expect(mock.failures.isEmpty)
+    }
+
+    /// Messages sent while we were offline arrive right after login, flagged as not new,
+    /// and each one is acknowledged so the server stops resending them.
+    @Test func offlineMessagesArriveAtLogin() async throws {
+        let mock = try await MockSoulseekServer()
+        mock.offlineMessages = [(11, "friend", "you there?"), (12, "friend", "ping me when you're back")]
+        defer { mock.stop() }
+        let (client, events, continuation) = makeClient(mock)
+        try await client.connect()
+
+        var received: [SlskPrivateMessage] = []
+        let deadline = finish(continuation, after: 10)
+        for await event in events {
+            if case .privateMessage(let message) = event {
+                received.append(message)
+                if received.count == 2 { continuation.finish() }
+            }
+        }
+        deadline.cancel()
+        try await waitUntil { mock.ackedMessageIDs.count == 2 }
+        await client.disconnect()
+
+        #expect(received.map(\.message) == ["you there?", "ping me when you're back"])
+        #expect(received.allSatisfy { !$0.isNew })
+        #expect(Set(mock.ackedMessageIDs) == [11, 12])
+    }
+
+    /// A blocked user's message is acknowledged (or the server would keep resending it) but
+    /// never reported.
+    @Test func blockedUsersMessagesAreDropped() async throws {
+        let mock = try await MockSoulseekServer()
+        defer { mock.stop() }
+        let (client, events, continuation) = makeClient(mock)
+        await client.updateBlockedUsers(["pest"])
+        try await client.connect()
+        try await mock.deliverMessage(id: 1, from: "pest", text: "buy my mixtape", isNew: true)
+        try await mock.deliverMessage(id: 2, from: "friend", text: "hi", isNew: true)
+
+        var senders: [String] = []
+        let deadline = finish(continuation, after: 10)
+        for await event in events {
+            if case .privateMessage(let message) = event {
+                senders.append(message.username)
+                if message.username == "friend" { continuation.finish() }
+            }
+        }
+        deadline.cancel()
+        try await waitUntil { mock.ackedMessageIDs.count == 2 }
+        await client.disconnect()
+
+        #expect(senders == ["friend"])
+        #expect(mock.ackedMessageIDs == [1, 2])
+    }
+
+    // MARK: User info
+
+    @Test func answersUserInfoRequests() async throws {
+        let mock = try await MockSoulseekServer()
+        defer { mock.stop() }
+        let client = SoulseekClient(username: "tester", password: "secret", server: (host: "127.0.0.1", port: mock.port)) { _ in }
+        await client.setOwnInfo(description: "casting on a Mac\nmostly jazz", picture: nil)
+        try await client.connect()
+        let info = try await mock.askClientForUserInfo()
+        await client.disconnect()
+
+        #expect(info.description == "casting on a Mac\nmostly jazz")
+        #expect(info.picture == nil)
+        #expect(info.uploadSlots == 2)
+        #expect(info.queueLength == 0)
+        #expect(info.slotFree)
+        #expect(mock.failures.isEmpty)
+    }
+
+    @Test func blockedUsersGetNoUserInfo() async throws {
+        let mock = try await MockSoulseekServer()
+        defer { mock.stop() }
+        let client = SoulseekClient(username: "tester", password: "secret", server: (host: "127.0.0.1", port: mock.port)) { _ in }
+        await client.updateBlockedUsers(["mockpeer"])
+        try await client.connect()
+        await #expect(throws: SlskError.self) { try await mock.askClientForUserInfo(timeout: 1.5) }
+        await client.disconnect()
+    }
+
+    /// The peer answers with its description and picture; the server with status (code 7,
+    /// and the WatchUser reply) and stats (code 36, and the WatchUser reply).
+    @Test func requestsUserInfoAndStats() async throws {
+        let mock = try await MockSoulseekServer()
+        defer { mock.stop() }
+        let (client, events, continuation) = makeClient(mock)
+        try await client.connect()
+
+        let info = try await client.userInfo(of: "mockpeer")
+        #expect(info.description == "mock peer, sharing since forever")
+        #expect(info.picture == Data([0x89, 0x50, 0x4E, 0x47]))
+        #expect(info.uploadSlots == 3)
+        #expect(info.queueLength == 7)
+        #expect(!info.slotFree)
+
+        await client.watch(user: "mockpeer")
+        await client.requestStatusAndStats(of: "mockpeer")
+
+        var statuses: [SlskUserStatus] = []
+        var privileged: [Bool] = []
+        var stats: [SlskUserStats] = []
+        let deadline = finish(continuation, after: 10)
+        for await event in events {
+            switch event {
+            case .userStatus(let user, let status, let isPrivileged):
+                #expect(user == "mockpeer")
+                statuses.append(status)
+                privileged.append(isPrivileged)
+            case .userStats(let user, let userStats):
+                #expect(user == "mockpeer")
+                stats.append(userStats)
+            default:
+                break
+            }
+            if statuses.count == 2, stats.count == 2 { continuation.finish() }
+        }
+        deadline.cancel()
+        await client.disconnect()
+
+        // WatchUser's reply first (online, no privilege flag), then GetUserStatus (away, privileged).
+        #expect(statuses == [.online, .away])
+        #expect(privileged == [false, true])
+        let expected = SlskUserStats(averageSpeed: 250_000, uploadCount: 42, files: 1234, folders: 56)
+        #expect(stats == [expected, expected])
+        #expect(mock.watchedUsers == ["mockpeer"])
+        #expect(mock.failures.isEmpty)
+    }
+
     // MARK: Helpers
+
+    private func makeClient(_ mock: MockSoulseekServer) -> (SoulseekClient, AsyncStream<SlskEvent>, AsyncStream<SlskEvent>.Continuation) {
+        var eventContinuation: AsyncStream<SlskEvent>.Continuation!
+        let events = AsyncStream<SlskEvent> { eventContinuation = $0 }
+        let continuation = eventContinuation!
+        let client = SoulseekClient(username: "tester", password: "secret", server: (host: "127.0.0.1", port: mock.port)) {
+            continuation.yield($0)
+        }
+        return (client, events, continuation)
+    }
+
+    private func finish(_ continuation: AsyncStream<SlskEvent>.Continuation, after seconds: Double) -> Task<Void, Error> {
+        Task {
+            try await Task.sleep(for: .seconds(seconds))
+            continuation.finish()
+        }
+    }
+
+    /// Polls until `condition` holds; records an issue after `timeout`.
+    private func waitUntil(timeout: Double = 5, _ condition: () -> Bool) async throws {
+        let start = ContinuousClock.now
+        while !condition() {
+            if ContinuousClock.now - start > .seconds(timeout) {
+                Issue.record("timed out waiting")
+                return
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+    }
 
     private func makeTempFolder() throws -> URL {
         let url = FileManager.default.temporaryDirectory
@@ -383,6 +587,8 @@ private final class MockSoulseekServer: @unchecked Sendable {
     /// When set, receiving a search response makes the mock turn around and queue a download
     /// of the first result (exercising the client's upload path).
     var requestUploadOnResult = false
+    /// Delivered (as re-sent, not new) right after login, like messages that waited for us.
+    var offlineMessages: [(id: UInt32, user: String, text: String)] = []
 
     private let listener: SlskListener
     private let peerListener: SlskListener
@@ -399,6 +605,78 @@ private final class MockSoulseekServer: @unchecked Sendable {
     private var _uploadOffer: (token: UInt32, path: String, size: UInt64)?
     private var _receivedFile: Data?
     private var connections: [any SlskStream] = []
+    private var _ackedMessageIDs: [UInt32] = []
+    private var _sentMessages: [(user: String, text: String)] = []
+    private var _watchedUsers: [String] = []
+
+    var ackedMessageIDs: [UInt32] {
+        lock.lock()
+        defer { lock.unlock() }
+        return _ackedMessageIDs
+    }
+
+    var sentMessages: [(user: String, text: String)] {
+        lock.lock()
+        defer { lock.unlock() }
+        return _sentMessages
+    }
+
+    var watchedUsers: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return _watchedUsers
+    }
+
+    /// Server code 22, received side: u32 ID, u32 timestamp, string user, string message, bool new.
+    func deliverMessage(id: UInt32, from username: String, text: String, isNew: Bool) async throws {
+        guard let connection = serverConnection else { throw SlskError(message: "no server connection yet") }
+        try await connection.send(messageFrame(id: id, from: username, text: text, isNew: isNew))
+    }
+
+    private func messageFrame(id: UInt32, from username: String, text: String, isNew: Bool) -> Data {
+        var body = SlskWriter()
+        body.u32(id)
+        body.u32(1_700_000_000)
+        body.string(username)
+        body.string(text)
+        body.bool(isNew)
+        return serverFrame(code: 22, body: body)
+    }
+
+    /// Acts as "mockpeer" asking the client about itself: dial its listener, send peer code 15,
+    /// read back the code 16 answer.
+    func askClientForUserInfo(timeout: Double = 5) async throws -> SlskUserInfo {
+        guard let port = clientListenPort, port != 0 else { throw SlskError(message: "client never sent SetWaitPort") }
+        let peer = TCPConnection(host: "127.0.0.1", port: port)
+        track(peer)
+        defer { peer.cancel() }
+        try await peer.start(timeout: 5)
+        try await peer.send(SlskPeerInit.peerInit(username: "mockpeer", connectionType: "P"))
+        try await peer.send(SlskPeerMessage.userInfoRequest())
+        let receiving = Task { () throws -> SlskUserInfo in
+            var frames = SlskFrameBuffer()
+            while let chunk = try await peer.receive() {
+                frames.append(chunk)
+                while let frame = try frames.nextFrame() {
+                    var reader = SlskReader(frame)
+                    if try reader.u32() == SlskPeerCode.userInfoResponse.rawValue {
+                        return try SlskUserInfo(parsing: Data(frame.dropFirst(4)))
+                    }
+                }
+            }
+            throw SlskError(message: "closed without user info")
+        }
+        let timer = Task {
+            try await Task.sleep(for: .seconds(timeout))
+            peer.cancel()
+        }
+        defer { timer.cancel() }
+        do {
+            return try await receiving.value
+        } catch {
+            throw SlskError(message: "no user info: \(error)")
+        }
+    }
 
     var receivedQuery: String? {
         lock.lock()
@@ -565,6 +843,9 @@ private final class MockSoulseekServer: @unchecked Sendable {
                     var interval = SlskWriter()
                     interval.u32(600)
                     try await connection.send(serverFrame(code: 104, body: interval))
+                    for message in offlineMessages {
+                        try await connection.send(messageFrame(id: message.id, from: message.user, text: message.text, isNew: false))
+                    }
                 case 2:  // SetWaitPort
                     recordClientPort(UInt16(exactly: try reader.u32()))
                 case 3:  // GetPeerAddress: the "peer" lives on our second listener
@@ -575,6 +856,34 @@ private final class MockSoulseekServer: @unchecked Sendable {
                     body.u32(UInt32(peerPort))
                     body.u32(1)
                     try await connection.send(serverFrame(code: 3, body: body))
+                case 5:  // WatchUser: exists, online, stats, country code
+                    let username = try reader.string()
+                    record { $0._watchedUsers.append(username) }
+                    var body = SlskWriter()
+                    body.string(username)
+                    body.bool(true)
+                    body.u32(SlskUserStatus.online.rawValue)
+                    Self.writeStats(&body)
+                    body.string("IS")
+                    try await connection.send(serverFrame(code: 5, body: body))
+                case 7:  // GetUserStatus
+                    var body = SlskWriter()
+                    body.string(try reader.string())
+                    body.u32(SlskUserStatus.away.rawValue)
+                    body.bool(true)
+                    try await connection.send(serverFrame(code: 7, body: body))
+                case 36:  // GetUserStats
+                    var body = SlskWriter()
+                    body.string(try reader.string())
+                    Self.writeStats(&body)
+                    try await connection.send(serverFrame(code: 36, body: body))
+                case 22:  // MessageUser, sent side: string user, string message
+                    let user = try reader.string()
+                    let text = try reader.string()
+                    record { $0._sentMessages.append((user, text)) }
+                case 23:  // MessageAcked
+                    let id = try reader.u32()
+                    record { $0._ackedMessageIDs.append(id) }
                 case 26:  // FileSearch: deliver one result like a peer would
                     let token = try reader.u32()
                     recordQuery(try reader.string())
@@ -595,6 +904,15 @@ private final class MockSoulseekServer: @unchecked Sendable {
                 }
             }
         }
+    }
+
+    /// avgspeed, uploadnum, unknown, files, dirs.
+    private static func writeStats(_ body: inout SlskWriter) {
+        body.u32(250_000)
+        body.u32(42)
+        body.u32(0)
+        body.u32(1234)
+        body.u32(56)
     }
 
     private func sendResultAsPeer(to port: UInt16, token: UInt32) async throws {
@@ -718,6 +1036,10 @@ private final class MockSoulseekServer: @unchecked Sendable {
                     }
                     list.u32(0)
                     try await connection.send(SlskPeerMessage.sharedFileListResponse(browsePayload: try SlskZlib.deflate(list.data)))
+                case .userInfoRequest:
+                    try await connection.send(SlskPeerMessage.userInfoResponse(
+                        description: "mock peer, sharing since forever", picture: Data([0x89, 0x50, 0x4E, 0x47]),
+                        uploadSlots: 3, queueLength: 7, slotFree: false))
                 case .transferRequest:
                     // The client offers to upload a file we queued: accept it.
                     let request = try SlskTransferRequest(parsing: Data(frame.dropFirst(4)))

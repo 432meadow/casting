@@ -61,6 +61,7 @@ struct SidebarView: View {
             }
             Section("Network") {
                 Label("Soulseek", systemImage: "point.3.connected.trianglepath.dotted")
+                    .badge(model.soulseek.chats.unreadTotal)
                     .tag(SidebarItem.soulseek)
                     .paletteSelection(model.selection == SidebarItem.soulseek)
             }

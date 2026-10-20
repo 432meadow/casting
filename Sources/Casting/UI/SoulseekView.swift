@@ -1,19 +1,19 @@
 import SwiftUI
 
 /// Soulseek: Search (query field, live results), Wishlist (saved searches repeated in the
-/// background), Browse (one user's whole share) and Downloads (transfers in both directions).
+/// background), Browse (one user's whole share), Messages (private conversations) and
+/// Downloads (transfers in both directions).
 struct SoulseekView: View {
-    enum Pane: Hashable {
-        case search, wishlist, browse, downloads
-    }
+    typealias Pane = SoulseekModel.Pane
 
     @Environment(AppModel.self) private var model
     @Environment(\.openSettings) private var openSettings
-    @State private var pane: Pane = .search
     @State private var selectedWishlistQuery: String?
     @State private var newWishlistQuery = ""
+    @State private var newConversationUser = ""
 
     private var soulseek: SoulseekModel { model.soulseek }
+    private var pane: Pane { soulseek.pane }
 
     var body: some View {
         if !soulseek.hasCredentials {
@@ -26,10 +26,11 @@ struct SoulseekView: View {
                     .buttonStyle(.borderedProminent)
             }
         } else {
+            @Bindable var soulseek = soulseek
             VStack(spacing: 0) {
                 topBar
                 Divider()
-                if pane != .downloads {
+                if pane != .downloads, pane != .messages {
                     ResultFilterBar(showsSlotFilter: pane != .browse, showsGrouping: pane != .browse)
                     Divider()
                 }
@@ -42,28 +43,29 @@ struct SoulseekView: View {
                     case .wishlist:
                         wishlistPane
                     case .browse:
-                        BrowsePane(onBrowse: browse)
+                        BrowsePane()
+                    case .messages:
+                        MessagesPane()
                     case .downloads:
                         transfersList
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            .sheet(item: $soulseek.userSheet) { sheet in
+                UserInfoSheet(user: sheet.user)
+            }
         }
-    }
-
-    private func browse(_ user: String) {
-        soulseek.browse(user: user)
-        pane = .browse
     }
 
     private var topBar: some View {
         @Bindable var soulseek = soulseek
         return HStack(spacing: 12) {
-            Picker("", selection: $pane) {
+            Picker("", selection: $soulseek.pane) {
                 Text("Search").tag(Pane.search)
                 Text(soulseek.wishlistNewTotal > 0 ? "Wishlist (\(soulseek.wishlistNewTotal))" : "Wishlist").tag(Pane.wishlist)
                 Text("Browse").tag(Pane.browse)
+                Text(soulseek.chats.unreadTotal > 0 ? "Messages (\(soulseek.chats.unreadTotal))" : "Messages").tag(Pane.messages)
                 Text(downloadsTabLabel).tag(Pane.downloads)
             }
             .pickerStyle(.segmented)
@@ -102,6 +104,13 @@ struct SoulseekView: View {
                     .onSubmit { soulseek.browse(user: soulseek.browseUser) }
                 Button("Browse") { soulseek.browse(user: soulseek.browseUser) }
                     .disabled(soulseek.browseUser.trimmingCharacters(in: .whitespaces).isEmpty)
+            case .messages:
+                TextField("Username", text: $newConversationUser)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 220)
+                    .onSubmit(startConversation)
+                Button("Message", action: startConversation)
+                    .disabled(newConversationUser.trimmingCharacters(in: .whitespaces).isEmpty)
             case .downloads:
                 Picker("Sort", selection: $soulseek.downloadSort) {
                     ForEach(SoulseekModel.DownloadSort.allCases) { Text($0.title).tag($0) }
@@ -124,6 +133,11 @@ struct SoulseekView: View {
         soulseek.addToWishlist(query)
         selectedWishlistQuery = query
         newWishlistQuery = ""
+    }
+
+    private func startConversation() {
+        soulseek.message(newConversationUser)
+        newConversationUser = ""
     }
 
     private var downloadsTabLabel: String {
@@ -170,7 +184,7 @@ struct SoulseekView: View {
         } else if soulseek.results.isEmpty {
             searchingPlaceholder
         } else {
-            ResultsTable(results: soulseek.results, onBrowse: browse)
+            ResultsTable(results: soulseek.results)
         }
     }
 
@@ -223,7 +237,7 @@ struct SoulseekView: View {
                 Group {
                     if let query = selectedWishlistQuery, soulseek.wishlist.contains(query) {
                         if let results = soulseek.wishlistResults[query], !results.isEmpty {
-                            ResultsTable(results: results, onBrowse: browse)
+                            ResultsTable(results: results)
                         } else {
                             ContentUnavailableView(
                                 "Nothing Yet",
@@ -285,7 +299,7 @@ struct SoulseekView: View {
                     Button("Remove") { soulseek.remove(download.id) }
                 }
                 Divider()
-                Button("Browse \(download.username)'s Files") { browse(download.username) }
+                SoulseekUserMenu(soulseek: soulseek, user: download.username)
             }
     }
 
@@ -325,8 +339,7 @@ struct SoulseekView: View {
                         ForEach(soulseek.uploads.reversed()) { upload in
                             UploadRow(upload: upload)
                                 .contextMenu {
-                                    Button("Browse \(upload.username)'s Files") { browse(upload.username) }
-                                    Button("Block \(upload.username)") { soulseek.block(upload.username) }
+                                    SoulseekUserMenu(soulseek: soulseek, user: upload.username)
                                 }
                         }
                     } header: {
@@ -466,7 +479,6 @@ struct ResultsTable: View {
     @Environment(AppModel.self) private var model
     let results: [SlskSearchResult]
     var allowsGrouping = true
-    let onBrowse: (String) -> Void
 
     @State private var sortOrder = [
         KeyPathComparator(\ResultRow.availability),
@@ -577,8 +589,7 @@ struct ResultsTable: View {
             Divider()
         }
         if let row = selected.first {
-            Button("Browse \(row.username)'s Files") { onBrowse(row.username) }
-            Button("Block \(row.username)") { soulseek.block(row.username) }
+            SoulseekUserMenu(soulseek: soulseek, user: row.username)
             Divider()
             Button("Copy Path") {
                 NSPasteboard.general.clearContents()
@@ -622,7 +633,6 @@ struct ResultsTable: View {
 /// One user's whole share: their folders on the left, the chosen folder's files on the right.
 private struct BrowsePane: View {
     @Environment(AppModel.self) private var model
-    let onBrowse: (String) -> Void
     @State private var selectedFolder: String?
 
     private var soulseek: SoulseekModel { model.soulseek }
@@ -664,12 +674,27 @@ private struct BrowsePane: View {
         let folders = visibleFolders(list)
         return HSplitView {
             VStack(spacing: 0) {
-                Text("\(list.username) · \(list.fileCount.formatted()) files in \(list.folders.count.formatted()) folders")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
+                HStack(spacing: 6) {
+                    Text("\(list.username) · \(list.fileCount.formatted()) files in \(list.folders.count.formatted()) folders")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Spacer()
+                    Menu {
+                        SoulseekUserMenu(soulseek: soulseek, user: list.username, showsBrowse: false)
+                    } label: {
+                        Image(systemName: "person.crop.circle")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("Message \(list.username), see their info, or block them")
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .contextMenu {
+                    SoulseekUserMenu(soulseek: soulseek, user: list.username, showsBrowse: false)
+                }
                 List(folders, selection: $selectedFolder) { folder in
                     VStack(alignment: .leading, spacing: 1) {
                         Text(folder.path.split(separator: "\\").last.map(String.init) ?? folder.path)
@@ -697,7 +722,7 @@ private struct BrowsePane: View {
                     if folder.files.isEmpty {
                         ContentUnavailableView("No Files Here", systemImage: "folder", description: Text("This folder only holds other folders."))
                     } else {
-                        ResultsTable(results: folder.files, allowsGrouping: false, onBrowse: onBrowse)
+                        ResultsTable(results: folder.files, allowsGrouping: false)
                     }
                 } else {
                     ContentUnavailableView("Choose a Folder", systemImage: "folder")
