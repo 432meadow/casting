@@ -61,6 +61,9 @@ struct ContentView: View {
             SmartPlaylistEditor(draft: draft)
         }
         .modifier(ExchangeSheets())
+        .sheet(item: $model.releaseLookup, onDismiss: { model.releaseLookup?.cancel() }) { lookup in
+            ReleaseLookupView(lookup: lookup)
+        }
         .onAppear { model.undoManager = undoManager }
         .onChange(of: undoManager) { model.undoManager = undoManager }
         .confirmationDialog(removalTitle, isPresented: Binding(
@@ -143,6 +146,11 @@ struct ContentView: View {
         }
         if model.keyAnalyzer.isRunning {
             writing += " · Detecting keys \(model.keyAnalyzer.done.formatted())/\(model.keyAnalyzer.total.formatted())"
+        }
+        if let search = model.coverSearch {
+            writing += " · Finding covers \(search.done.formatted())/\(search.total.formatted())"
+        } else if let summary = model.coverSearchSummary {
+            writing += " · \(summary)"
         }
         if model.selection == .albums {
             return "\(model.albums.count.formatted()) albums · \(tracks.count.formatted()) tracks · \(span)\(writing)"

@@ -26,6 +26,10 @@ struct AlbumGridView: View {
                                 Button("Show in Finder") {
                                     NSWorkspace.shared.activateFileViewerSelecting(album.tracks.map { URL(fileURLWithPath: $0.path) })
                                 }
+                                Divider()
+                                Button("Look Up Album on MusicBrainz…") { model.lookUpAlbum(for: album.tracks) }
+                                Button("Find Missing Cover") { model.findMissingCovers(for: [album]) }
+                                    .disabled(model.coverSearch != nil)
                             }
                     }
                 }

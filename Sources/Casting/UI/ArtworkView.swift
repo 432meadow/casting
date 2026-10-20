@@ -8,6 +8,8 @@ struct ArtworkView: View {
     var cornerRadius: CGFloat = 4
 
     @State private var image: NSImage?
+    /// Bumped when the album's cover changes, to load it again.
+    @State private var revision = 0
 
     var body: some View {
         Color.clear
@@ -20,7 +22,10 @@ struct ArtworkView: View {
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
-            .task(id: request) {
+            .onReceive(NotificationCenter.default.publisher(for: ArtworkStore.didChange)) { note in
+                if let request, note.object as? String == request.id { revision += 1 }
+            }
+            .task(id: ArtworkTaskID(request: request, revision: revision)) {
                 guard let request else {
                     image = nil
                     return
@@ -30,6 +35,11 @@ struct ArtworkView: View {
                 let loaded = await ArtworkStore.shared.image(for: request, pixelSize: pixelSize)
                 if !Task.isCancelled { image = loaded }
             }
+    }
+
+    private struct ArtworkTaskID: Equatable {
+        var request: ArtworkRequest?
+        var revision: Int
     }
 
     private var placeholder: some View {

@@ -20,7 +20,7 @@ enum ID3Tag: TagFormat {
     private static let v22Names: [String: String] = [
         "TIT2": "TT2", "TPE1": "TP1", "TALB": "TAL", "TPE2": "TP2", "TCON": "TCO", "TCOM": "TCM",
         "TIT1": "TT1", "TYER": "TYE", "TRCK": "TRK", "TPOS": "TPA", "TBPM": "TBP", "TKEY": "TKE", "TCMP": "TCP",
-        "COMM": "COM", "POPM": "POP",
+        "COMM": "COM", "POPM": "POP", "APIC": "PIC",
     ]
 
     /// A frame's name in this tag version (nil: v2.2 has no such frame).
@@ -208,6 +208,15 @@ enum ID3Tag: TagFormat {
             }
         }
 
+        if let artwork = values.artwork {
+            let index = frames.firstIndex { isFrontCover($0) }
+            frames.removeAll { isFrontCover($0) }
+            if !artwork.data.isEmpty {
+                frames.insert(makeFrame(name("APIC", version)!, body: pictureBody(artwork, version: version), version: version),
+                              at: index ?? frames.count)
+            }
+        }
+
         let frameBytes = frames.flatMap(\.raw)
         // Keep the old tag size when the frames still fit, so the audio stays at the same offset;
         // otherwise leave a little room for next time.
@@ -247,6 +256,53 @@ enum ID3Tag: TagFormat {
         // Language, then an empty description (terminator only; UTF-16 needs a BOM before it).
         let description: [UInt8] = encoding == 1 ? [0xFF, 0xFE, 0, 0] : [0]
         return [encoding] + Array("eng".utf8) + description + bytes
+    }
+
+    /// A front cover (picture type 3) with an empty description. v2.2's PIC names the format with
+    /// three letters instead of a MIME type.
+    private static func pictureBody(_ artwork: Artwork, version: UInt8) -> [UInt8] {
+        let format = version == 2 ? Array((artwork.isPNG ? "PNG" : "JPG").utf8) : Array(artwork.mimeType.utf8) + [0]
+        return [0] + format + [3, 0] + [UInt8](artwork.data)
+    }
+
+    /// An APIC/PIC frame's picture type, MIME type and image bytes.
+    static func picture(_ frame: Frame) -> (type: UInt8, mimeType: String, data: [UInt8])? {
+        guard frame.id == "APIC" || frame.id == "PIC" else { return nil }
+        let body = Array(frame.body)
+        guard body.count >= 5 else { return nil }
+        let encoding = body[0]
+        let mimeType: String, typeIndex: Int
+        if frame.id == "PIC" {
+            mimeType = body.ascii(1..<4).uppercased() == "PNG" ? "image/png" : "image/jpeg"
+            typeIndex = 4
+        } else {
+            guard let nul = body[1...].firstIndex(of: 0), nul + 1 < body.count else { return nil }
+            let declared = body.ascii(1..<nul).lowercased()
+            mimeType = declared.contains("png") ? "image/png" : "image/jpeg"
+            typeIndex = nul + 1
+        }
+        guard let dataStart = afterTerminator(body, from: typeIndex + 1, wide: encoding == 1 || encoding == 2) else { return nil }
+        return (body[typeIndex], mimeType, Array(body[dataStart...]))
+    }
+
+    /// The index just past a text field's terminator (one NUL, or two for UTF-16).
+    private static func afterTerminator(_ bytes: [UInt8], from start: Int, wide: Bool) -> Int? {
+        var i = start
+        while i < bytes.count {
+            if wide {
+                if i + 1 < bytes.count, bytes[i] == 0, bytes[i + 1] == 0 { return i + 2 }
+                i += 2
+            } else {
+                if bytes[i] == 0 { return i + 1 }
+                i += 1
+            }
+        }
+        return nil
+    }
+
+    /// Front covers are what casting writes; other pictures (back cover, artist, …) are kept.
+    private static func isFrontCover(_ frame: Frame) -> Bool {
+        picture(frame)?.type == 3
     }
 
     /// COMM frames with an empty description hold the user's comment; others (iTunNORM,
@@ -310,6 +366,9 @@ enum ID3Tag: TagFormat {
             let body = Array(popm.body)
             if let nul = body.firstIndex(of: 0), nul + 1 < body.count { values.rating = POPMRating.rating(for: body[nul + 1]) }
         }
+        if let cover = parsed.frames.lazy.compactMap(picture).first(where: { $0.type == 3 }) {
+            values.artwork = Artwork(data: Data(cover.data), mimeType: cover.mimeType)
+        }
         return values
     }
 
@@ -354,7 +413,10 @@ enum ID3Tag: TagFormat {
         for field in values.setFields { touched.formUnion(ids(for: field, version: before.version)) }
         if values.rating != nil { touched.insert(name("POPM", before.version)!) }
         func untouched(_ frames: [Frame]) -> [Frame] {
-            frames.filter { !touched.contains($0.id) && !(values.comment != nil && isPlainComment($0)) }
+            frames.filter {
+                !touched.contains($0.id) && !(values.comment != nil && isPlainComment($0))
+                    && !(values.artwork != nil && isFrontCover($0))
+            }
         }
         guard untouched(before.frames) == untouched(after.frames) else {
             throw TagWriteError.verificationFailed("other frames changed")

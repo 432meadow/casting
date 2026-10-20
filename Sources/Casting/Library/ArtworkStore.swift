@@ -38,12 +38,18 @@ actor AsyncLimiter {
 
 /// Loads album artwork, cheapest source first:
 /// 1. memory cache
-/// 2. our own disk cache of art extracted from files
-/// 3. artwork embedded in the audio file (then written to our disk cache)
+/// 2. covers fetched for the album (Cover Art Archive), kept with the library
+/// 3. our own disk cache of art extracted from files
+/// 4. artwork embedded in the audio file (then written to our disk cache)
+/// 5. a cover image next to the files (cover.jpg, folder.jpg, front.jpg, …)
 final class ArtworkStore: @unchecked Sendable {
     static let shared = ArtworkStore()
 
+    /// Posted on the main queue with the album's request ID as `object` when its cover changes.
+    static let didChange = Notification.Name("ArtworkStore.didChange")
+
     private let diskCache: URL
+    private let covers: URL
     private let memory = NSCache<NSString, NSImage>()
     private let lock = NSLock()
     /// Requests already known to have no artwork, so scrolling doesn't retry them.
@@ -53,9 +59,11 @@ final class ArtworkStore: @unchecked Sendable {
 
     init(
         diskCache: URL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("casting/Artwork")
+            .appendingPathComponent("casting/Artwork"),
+        covers: URL = LibraryStore.supportDirectory.appendingPathComponent("casting/Covers")
     ) {
         self.diskCache = diskCache
+        self.covers = covers
         memory.totalCostLimit = 200 * 1024 * 1024
         try? FileManager.default.createDirectory(at: diskCache, withIntermediateDirectories: true)
     }
@@ -63,6 +71,28 @@ final class ArtworkStore: @unchecked Sendable {
     /// Lets albums that had no art be looked up again (e.g. after the music share remounts).
     func forgetMisses() {
         lock.withLock { misses.removeAll() }
+    }
+
+    /// Uses `data` as the album's cover from now on (it outranks embedded art), and tells views
+    /// showing the album to reload.
+    func setCover(_ data: Data, for id: String) throws {
+        try FileManager.default.createDirectory(at: covers, withIntermediateDirectories: true)
+        try data.write(to: covers.appendingPathComponent(Self.fileName(for: id, extension: "img")), options: .atomic)
+        try? FileManager.default.removeItem(at: diskCache.appendingPathComponent(Self.fileName(for: id)))
+        lock.withLock { _ = misses.remove(id) }
+        // NSCache can't list its keys, and covers are cheap to decode again.
+        memory.removeAllObjects()
+        DispatchQueue.main.async { NotificationCenter.default.post(name: Self.didChange, object: id) }
+    }
+
+    /// The cover fetched for the album, if any (as stored, not resized).
+    func fetchedCover(for id: String) -> Data? {
+        try? Data(contentsOf: covers.appendingPathComponent(Self.fileName(for: id, extension: "img")))
+    }
+
+    /// Whether the album has art from any source (loads it, so it's cached for next time).
+    func hasArtwork(_ request: ArtworkRequest) async -> Bool {
+        await image(for: request, pixelSize: 64) != nil
     }
 
     /// Synchronous memory-cache hit, so already-seen covers appear without a flash.
@@ -95,6 +125,10 @@ final class ArtworkStore: @unchecked Sendable {
     // MARK: Loading
 
     private func load(_ request: ArtworkRequest, pixelSize: Int) async -> CGImage? {
+        let fetched = covers.appendingPathComponent(Self.fileName(for: request.id, extension: "img"))
+        if let image = Self.thumbnail(CGImageSourceCreateWithURL(fetched as CFURL, nil), maxPixels: pixelSize) {
+            return image
+        }
         let cached = diskCache.appendingPathComponent(Self.fileName(for: request.id))
         if let image = Self.thumbnail(CGImageSourceCreateWithURL(cached as CFURL, nil), maxPixels: pixelSize) {
             return image
@@ -113,7 +147,33 @@ final class ArtworkStore: @unchecked Sendable {
             }
             return Self.thumbnail(source, maxPixels: pixelSize)
         }
+
+        for folder in Set(request.filePaths.prefix(3).map { ($0 as NSString).deletingLastPathComponent }).sorted() {
+            guard !Task.isCancelled, let image = Self.folderImage(in: folder),
+                  let source = CGImageSourceCreateWithURL(image as CFURL, nil) else { continue }
+            if let stored = Self.thumbnail(source, maxPixels: 512) {
+                Self.writePNG(stored, to: cached)
+            }
+            return Self.thumbnail(source, maxPixels: pixelSize)
+        }
         return nil
+    }
+
+    /// Names other players and rippers give a folder's cover, best first.
+    static let folderImageNames = ["cover", "folder", "front", "albumart", "album"]
+
+    /// A cover image in the folder (one directory listing, no file reads), if there is one.
+    static func folderImage(in folder: String) -> URL? {
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: folder) else { return nil }
+        var found: [String: String] = [:]
+        for name in names where !name.hasPrefix(".") {
+            let ext = (name as NSString).pathExtension.lowercased()
+            guard ["jpg", "jpeg", "png"].contains(ext) else { continue }
+            let base = (name as NSString).deletingPathExtension.lowercased()
+            if found[base] == nil { found[base] = name }
+        }
+        guard let name = folderImageNames.lazy.compactMap({ found[$0] }).first else { return nil }
+        return URL(fileURLWithPath: folder).appendingPathComponent(name)
     }
 
     /// Album identity: artist + album, ignoring case, stray whitespace and Unicode normalization.
@@ -155,8 +215,8 @@ final class ArtworkStore: @unchecked Sendable {
         CGImageDestinationFinalize(destination)
     }
 
-    private static func fileName(for id: String) -> String {
-        SHA256.hash(data: Data(id.utf8)).map { String(format: "%02x", $0) }.joined() + ".png"
+    private static func fileName(for id: String, extension ext: String = "png") -> String {
+        SHA256.hash(data: Data(id.utf8)).map { String(format: "%02x", $0) }.joined() + "." + ext
     }
 
     private static func memoryKey(_ request: ArtworkRequest, _ pixelSize: Int) -> NSString {

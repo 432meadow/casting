@@ -147,6 +147,24 @@ xattr -dr com.apple.quarantine /Applications/casting.app
   written to ID3 `TKEY` and FLAC `INITIALKEY`; MP4 files have no standard key item, so keys are
   read from them but not written. It's checked against generated chord progressions, not yet
   against a tagged library, so treat it as a first guess.
+- **Look Up Album on MusicBrainz…** (⇧⌘L, Track menu, or right-click a track or album) matches
+  the selected tracks (one track stands for its album) to a MusicBrainz release. It searches by
+  the artist and album the tags agree on, or the folder name ("Artist - Album (2003) [FLAC]"),
+  fetches the track lists of the closest few releases, and pairs each file with a release track
+  by title, length and track number (from the tags or a "1-03 Title" file name). A release whose
+  tracks all pair up with lengths within 5 s gets a ✓; otherwise you see how far off it is and
+  which files didn't fit. A pasted MusicBrainz release link picks one by hand. Pick what to
+  apply (titles, artists, album and year, track and disc numbers, cover): tags are saved like
+  Get Info edits (undoable), the year is the release group's first one, and a Various Artists
+  release marks the tracks as a compilation (`Library/ReleaseMatcher.swift`).
+- **Covers** come from the [Cover Art Archive](https://coverartarchive.org) (at most 1200 px;
+  bigger ones are scaled down). A fetched cover shows at once (it's kept in
+  `~/Library/Application Support/casting/Covers` and outranks embedded art), and with "Write
+  tags to files" on it's embedded in the files too (see below). **Find Missing Covers** (Track
+  menu or right-click, or File ▸ Find Missing Covers for All Albums) looks for each album with
+  no cover (embedded, fetched, or a cover.jpg/folder.jpg/front.jpg next to the files, which
+  casting now also shows) and takes the cover of the MusicBrainz release group with exactly
+  that title by that artist, in the background with progress in the subtitle.
 
 **Import and export** (File menu; nothing here reads audio, it all comes from the database)
 - **M3U playlists**: **Export Playlist…** (File menu, or right-click a playlist) saves a playlist,
@@ -272,6 +290,15 @@ xattr -dr com.apple.quarantine /Applications/casting.app
   Message and Block. casting answers the same request with the description from Settings ▸
   Soulseek, its two upload slots, its queue and whether a slot is free (blocked users get no
   answer).
+- **Tagging finished downloads** (Settings ▸ Soulseek, on by default): once a download folder
+  has no transfers left, it's matched to a MusicBrainz release like Look Up Album ("CD1"/"Disc 2"
+  subfolders count as one album). Only when every file pairs with a track and the lengths agree
+  are the tags fixed and written into the downloaded files (even with "Write tags to files"
+  off; they're casting's own downloads), the cover embedded and saved as cover.jpg. Optionally
+  the album is also **moved into "Artist/Album (Year)"** inside the download folder, files
+  renamed "03 Title.ext" ("1-03 Title.ext" on multi-disc releases), along with the rest of the
+  folder (cue sheets, logs, images). Anything less certain is left alone with a notification;
+  right-click a finished download ▸ **Look Up Album on MusicBrainz…** to pick the release yourself.
 - **Notifications** (Settings ▸ Soulseek, on by default) when a download folder finishes and is
   imported, and when a saved search turns up new results; a separate switch covers private
   messages (one per sender, so a burst at login doesn't flood). They need the app bundle (not
@@ -287,11 +314,11 @@ time). With it on, Get Info edits and ratings are queued and written into the fi
 background, one file at a time, with progress in Settings and the window subtitle. Play counts
 stay in casting's database (rewriting a file after every play isn't worth it).
 
-| Format | Tags | Rating |
-| --- | --- | --- |
-| MP3 | ID3v2.2 / v2.3 / v2.4 (keeps the file's version; untagged files get v2.3) | `POPM`, MusicBee values (½★ = 13 … 4½★ = 242, 5★ = 255); existing POPM frames keep their email and play counter |
-| FLAC | Vorbis comments | `RATING` 0–100 (20 per star) |
-| M4A | iTunes `ilst` items | not written: no rating field that other players agree on |
+| Format | Tags | Rating | Cover |
+| --- | --- | --- | --- |
+| MP3 | ID3v2.2 / v2.3 / v2.4 (keeps the file's version; untagged files get v2.3) | `POPM`, MusicBee values (½★ = 13 … 4½★ = 242, 5★ = 255); existing POPM frames keep their email and play counter | `APIC` (`PIC` in v2.2), front cover; other pictures kept |
+| FLAC | Vorbis comments | `RATING` 0–100 (20 per star) | `PICTURE` block, front cover; other pictures kept |
+| M4A | iTunes `ilst` items | not written: no rating field that other players agree on | `covr` (replaces every picture) |
 
 WAV/AIFF, unsynchronised or compressed ID3 tags, and fragmented MP4 are reported and skipped.
 
@@ -346,18 +373,18 @@ volume (SMB, AFP, NFS) can arrive slowly (the share casting was developed agains
 
 | Path | What |
 | --- | --- |
-| `Sources/Casting/Library/` | SQLite wrapper, store (+ editing, history, listen log, removal, saved tag writes), listening stats, artist index and discography matching, smart playlist predicates, tag reader, albums, artwork, BPM and key detection, search scopes, duplicate and missing-file checks |
+| `Sources/Casting/Library/` | SQLite wrapper, store (+ editing, history, listen log, removal, saved tag writes), listening stats, artist index and discography matching, MusicBrainz release matching, smart playlist predicates, tag reader, albums, artwork, BPM and key detection, search scopes, duplicate and missing-file checks |
 | `Sources/Casting/Library/TagWriting/` | ID3 / FLAC / MP4 tag writers, safe file replacement, background write queue |
 | `Sources/Casting/Playback/` | Player (queue, gapless, shuffle/repeat), two-deck mixer and track analysis (waveforms, beat grid), file cache, EQ, output devices, Now Playing |
 | `Sources/Casting/Exchange/` | M3U playlists, Apple Music / iTunes `Library.xml` reader and import plan, Rekordbox XML writer, path matching, atomic export writes, remembered beat grids |
-| `Sources/Casting/Metadata/` | MusicBrainz / Wikipedia / ListenBrainz client for artist pages (rate limit, disk cache) |
+| `Sources/Casting/Metadata/` | MusicBrainz / Wikipedia / ListenBrainz client for artist pages (rate limit, disk cache), MusicBrainz release search and Cover Art Archive covers |
 | `Sources/Casting/Soulseek/` | Soulseek client: wire codec, messages, client actor (server + peer connections), UI model, private conversations (saved to disk) |
-| `Sources/Casting/AppModel*.swift` | App state, selection, actions and undo, scanning, library housekeeping, import and export |
+| `Sources/Casting/AppModel*.swift` | App state, selection, actions and undo, scanning, library housekeeping, import and export, Look Up Album, covers and tidying Soulseek downloads |
 | `Sources/Casting/Updater.swift` | Sparkle in-app updates (Check for Updates…, automatic checks) |
 | `Sources/Casting/Reporting/` | Bug reports: event log, diagnostics, redaction, crash report summaries, the GitHub issue link |
 | `Sources/Casting/UI/` | Track table (NSTableView), sidebar, albums, browser, Up Next, Get Info, smart editor, EQ, mixer, Rekordbox export sheet, Soulseek (+ messages and user info), settings, menu bar |
 | `Sources/ObjCSupport/` | Catches NSExceptions (predicate evaluation, audio graph connections) |
-| `Tests/CastingTests/` | 171 tests: listening stats, the listen log (store, v2→v3 upgrade, player skip/pause/stop tracking), discography matching, artist index, smart playlist predicates, albums/artwork, library editing, history/removal/saved tag writes and the v1→v2 upgrade, search scopes, duplicates, missing-file checks, tag reading and writing (on generated files), BPM detection (generated drum patterns, WAV and FLAC excerpts), beat grids (click tracks) and keys (chord progressions), player, mixer, import and export (M3U round trips and other apps' playlists, a generated `Library.xml` and the import plan, the Rekordbox XML shape), bug reports (redaction, issue links, crash summaries, event log), Soulseek codec + loopback client tests (search, wishlist, browse, download, resume, denial, blocking, serving searches + uploads, upload speed limit, private messages and acks, offline messages, user info and stats) against a mock server, and saved conversations |
+| `Tests/CastingTests/` | 190 tests (plus one against the live MusicBrainz and Cover Art Archive, run with `CASTING_LIVE_TESTS=1`): listening stats, the listen log (store, v2→v3 upgrade, player skip/pause/stop tracking), discography matching, artist index, smart playlist predicates, albums/artwork, library editing, history/removal/saved tag writes and the v1→v2 upgrade, search scopes, duplicates, missing-file checks, tag reading and writing (on generated files), BPM detection (generated drum patterns, WAV and FLAC excerpts), beat grids (click tracks) and keys (chord progressions), player, mixer, import and export (M3U round trips and other apps' playlists, a generated `Library.xml` and the import plan, the Rekordbox XML shape), bug reports (redaction, issue links, crash summaries, event log), release matching (tagged and untagged files, multi-disc, near misses, edits, folder names) and covers in MP3/FLAC/M4A tags, fetched and folder covers, Soulseek codec + loopback client tests (search, wishlist, browse, download, resume, denial, blocking, serving searches + uploads, upload speed limit, private messages and acks, offline messages, user info and stats) against a mock server, and saved conversations |
 
 ## Known issues
 

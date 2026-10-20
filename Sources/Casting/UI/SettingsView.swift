@@ -225,6 +225,12 @@ private struct SoulseekSettings: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Toggle("Notify when a download folder finishes or a saved search finds something new", isOn: $soulseek.postsNotifications)
+                Toggle("Tag finished albums from MusicBrainz", isOn: $soulseek.tagsDownloads)
+                Toggle("Move them into Artist/Album (Year) folders", isOn: $soulseek.organizesDownloads)
+                    .disabled(!soulseek.tagsDownloads)
+                Text("Only when every file matches a release's track list and the lengths agree; the tags and cover are written into the downloaded files. Anything less certain is left as it is: right-click it in Downloads ▸ Look Up Album… to pick the release.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

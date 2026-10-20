@@ -1,10 +1,11 @@
 import Foundation
+import ImageIO
 
-/// Vorbis comments in FLAC files.
+/// Vorbis comments and the front cover in FLAC files.
 ///
-/// Only the comment block changes: comments for edited fields are replaced, all others (and the
-/// vendor string) are kept in order. Other metadata blocks (STREAMINFO, pictures, seek table, …)
-/// are copied byte for byte; a PADDING block absorbs the size change when it can, so the audio
+/// Only the comment block (and, when the cover is edited, the front-cover PICTURE block) changes:
+/// comments for edited fields are replaced, all others (and the vendor string) are kept in order.
+/// Other metadata blocks (STREAMINFO, other pictures, seek table, …) are copied byte for byte; a PADDING block absorbs the size change when it can, so the audio
 /// frames usually stay at the same offset.
 enum FLACTag: TagFormat {
     struct Block: Equatable {
@@ -163,16 +164,24 @@ enum FLACTag: TagFormat {
 
         let body = encodeComments(comments)
         guard body.count < 1 << 24 else { throw TagWriteError.malformed("comments too large") }
-        let oldSize: Int
         if let commentIndex {
-            oldSize = blocks[commentIndex].body.count
             blocks[commentIndex].body = body
-        } else {
-            oldSize = -4  // a new block also adds its 4-byte header
+        } else if !touched.isEmpty {
             blocks.insert(Block(type: 4, body: body), at: 1)
         }
+        if let artwork = values.artwork {
+            let index = blocks.firstIndex(where: isFrontCover)
+            blocks.removeAll(where: isFrontCover)
+            if !artwork.data.isEmpty {
+                let picture = pictureBody(artwork)
+                guard picture.count < 1 << 24 else { throw TagWriteError.unsupportedTag("A cover over 16 MB") }
+                let afterLast = (blocks.lastIndex { $0.type != 1 } ?? 0) + 1
+                blocks.insert(Block(type: 6, body: picture), at: index ?? afterLast)
+            }
+        }
         // Let padding absorb the difference so the audio doesn't move.
-        let growth = body.count - oldSize
+        func metadataSize(_ blocks: [Block]) -> Int { blocks.filter { $0.type != 1 }.reduce(0) { $0 + 4 + $1.body.count } }
+        let growth = metadataSize(blocks) - metadataSize(parsed.blocks)
         if let padding = blocks.firstIndex(where: { $0.type == 1 }), blocks[padding].body.count >= growth {
             blocks[padding].body = [UInt8](repeating: 0, count: blocks[padding].body.count - growth)
         }
@@ -185,8 +194,49 @@ enum FLACTag: TagFormat {
         return out + Array(bytes[parsed.audioStart...])
     }
 
+    /// A front cover (picture type 3) with no description. Size and depth come from the image.
+    static func pictureBody(_ artwork: Artwork) -> [UInt8] {
+        var width = 0, height = 0, depth = 24
+        if let source = CGImageSourceCreateWithData(artwork.data as CFData, nil),
+           let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] {
+            width = properties[kCGImagePropertyPixelWidth] as? Int ?? 0
+            height = properties[kCGImagePropertyPixelHeight] as? Int ?? 0
+            if let bits = properties[kCGImagePropertyDepth] as? Int {
+                depth = bits * (properties[kCGImagePropertyHasAlpha] as? Bool == true ? 4 : 3)
+            }
+        }
+        let mime = Array(artwork.mimeType.utf8)
+        return [UInt8].be32(3) + [UInt8].be32(mime.count) + mime + [UInt8].be32(0)
+            + [UInt8].be32(width) + [UInt8].be32(height) + [UInt8].be32(depth) + [UInt8].be32(0)
+            + [UInt8].be32(artwork.data.count) + [UInt8](artwork.data)
+    }
+
+    /// A PICTURE block's picture type, MIME type and image bytes.
+    static func picture(_ block: Block) -> (type: Int, mimeType: String, data: [UInt8])? {
+        let body = block.body
+        guard block.type == 6, body.count >= 32 else { return nil }
+        let mimeLength = Int(body.uint32BE(at: 4))
+        let descriptionAt = 8 + mimeLength
+        guard descriptionAt + 4 <= body.count else { return nil }
+        let dataLengthAt = descriptionAt + 4 + Int(body.uint32BE(at: descriptionAt)) + 16
+        guard dataLengthAt + 4 <= body.count else { return nil }
+        let dataStart = dataLengthAt + 4, dataLength = Int(body.uint32BE(at: dataLengthAt))
+        guard dataStart + dataLength <= body.count else { return nil }
+        return (Int(body.uint32BE(at: 0)), body.ascii(8..<descriptionAt), Array(body[dataStart..<dataStart + dataLength]))
+    }
+
+    private static func isFrontCover(_ block: Block) -> Bool { picture(block)?.type == 3 }
+
     static func read(_ bytes: [UInt8]) throws -> TagValues {
         let parsed = try parse(bytes)
+        var values = try readComments(parsed)
+        if let cover = parsed.blocks.lazy.compactMap(picture).first(where: { $0.type == 3 }) {
+            values.artwork = Artwork(data: Data(cover.data), mimeType: cover.mimeType)
+        }
+        return values
+    }
+
+    private static func readComments(_ parsed: Parsed) throws -> TagValues {
         guard let block = parsed.blocks.first(where: { $0.type == 4 }) else { return TagValues() }
         let entries = try parseComments(block.body).entries
         func value(_ key: String) -> String? {
@@ -225,7 +275,9 @@ enum FLACTag: TagFormat {
               rewritten[after.audioStart...] == original[before.audioStart...] else {
             throw TagWriteError.verificationFailed("audio data differs")
         }
-        func others(_ blocks: [Block]) -> [Block] { blocks.filter { $0.type != 4 && $0.type != 1 } }
+        func others(_ blocks: [Block]) -> [Block] {
+            blocks.filter { $0.type != 4 && $0.type != 1 && !(values.artwork != nil && isFrontCover($0)) }
+        }
         guard others(before.blocks) == others(after.blocks) else { throw TagWriteError.verificationFailed("other metadata changed") }
         let touched = touchedKeys(values)
         func untouched(_ parsed: Parsed) throws -> [String] {
